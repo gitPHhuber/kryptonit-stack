@@ -14,3 +14,11 @@ caddy_admin_email: "admin@infra.local"
 authentik_upstream: "authentik-server:9000"
 nextcloud_upstream: "nextcloud-app:80"
 onlyoffice_upstream: "onlyoffice:80"
+
+# Внутренняя точка выдачи сертификатов
+private_ca_hostname: "ca.{{ base_domain }}"
+private_ca_project_path: /opt/private-ca
+private_ca_root_cert_path: >-
+  {{ private_ca_project_path }}/config/certs/root_ca.crt
+internal_ca_url: >-
+  https://private-ca:9000/acme/acme/directory

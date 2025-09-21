@@ -10,6 +10,31 @@
     - "{{ caddy_proxy_project_path }}"
     - "{{ caddy_proxy_project_path }}/data"
     - "{{ caddy_proxy_project_path }}/config"
+    - "{{ caddy_proxy_project_path }}/pki"
+
+- name: Check private CA root certificate presence
+  ansible.builtin.stat:
+    path: "{{ private_ca_root_cert_path }}"
+  register: caddy_proxy_private_ca_root
+
+- name: Ensure private CA root certificate exists
+  ansible.builtin.fail:
+    msg: |
+      The private CA root certificate was not found at
+      {{ private_ca_root_cert_path }}.
+      Ensure the private_ca role ran successfully on the proxy host
+      before configuring Caddy.
+  when: not caddy_proxy_private_ca_root.stat.exists
+
+- name: Distribute private CA root certificate to Caddy project
+  ansible.builtin.copy:
+    src: "{{ private_ca_root_cert_path }}"
+    dest: "{{ caddy_proxy_project_path }}/pki/root_ca.crt"
+    owner: root
+    group: root
+    mode: '0644'
+    remote_src: true
+  notify: Apply Caddy stack
 
 - name: Render Caddyfile
   ansible.builtin.template:
@@ -18,7 +43,7 @@
     owner: root
     group: root
     mode: '0644'
-  register: caddy_proxy_caddyfile
+  notify: Apply Caddy stack
 
 - name: Write docker-compose.yml for Caddy
   ansible.builtin.copy:
@@ -37,6 +62,8 @@
             - "443:443/udp"
           networks:
             - infra
+          environment:
+            CADDY_TRUSTED_ROOTS: /etc/caddy/pki/root_ca.crt
           healthcheck:
             test: ["CMD", "caddy", "version"]
             interval: 30s
@@ -46,80 +73,32 @@
             - ./Caddyfile:/etc/caddy/Caddyfile:ro
             - ./data:/data
             - ./config:/config
+            - ./pki:/etc/caddy/pki:ro
           restart: unless-stopped
       networks:
         infra:
           external: true
           name: {{ docker_infra_network }}
-  register: caddy_proxy_compose_render
+  notify: Apply Caddy stack
 
-- name: Assume Caddy stack is healthy
-  ansible.builtin.set_fact:
-    caddy_proxy_compose_should_apply: false
-  changed_when: false
-
-- name: Inspect current Caddy stack status
+- name: Ensure Caddy stack is running  # noqa command-instead-of-module
   ansible.builtin.command:
     cmd: >-
-      docker compose --ansi never
-      -f {{ caddy_proxy_compose_file }}
-      ps --format json
-    chdir: "{{ caddy_proxy_project_path }}"
-  register: caddy_proxy_compose_status
-  changed_when: false
-  failed_when: caddy_proxy_compose_status.rc not in [0, 1]
-
-- name: Parse Caddy compose status output
-  ansible.builtin.set_fact:
-    caddy_proxy_compose_containers: >-
-      {{ caddy_proxy_compose_status.stdout | from_json }}
-  when:
-    - caddy_proxy_compose_status.rc == 0
-    - caddy_proxy_compose_status.stdout | trim | length > 0
-  changed_when: false
-
-- name: Mark Caddy stack for apply when status command fails
-  ansible.builtin.set_fact:
-    caddy_proxy_compose_should_apply: true
-  when: caddy_proxy_compose_status.rc != 0
-  changed_when: false
-
-- name: Mark Caddy stack for apply when no containers are present
-  ansible.builtin.set_fact:
-    caddy_proxy_compose_should_apply: true
-  when:
-    - caddy_proxy_compose_status.rc == 0
-    - caddy_proxy_compose_containers | default([]) | length == 0
-  changed_when: false
-
-- name: Mark Caddy stack for apply when containers are not running
-  ansible.builtin.set_fact:
-    caddy_proxy_compose_should_apply: true
-  when:
-    - caddy_proxy_compose_status.rc == 0
-    - >-
-      (caddy_proxy_compose_containers | default([])
-       | selectattr('State', 'ne', 'running')
-       | list | length) > 0
-  changed_when: false
-
-- name: Mark Caddy stack for apply when configuration changed
-  ansible.builtin.set_fact:
-    caddy_proxy_compose_should_apply: true
-  when: caddy_proxy_caddyfile.changed or caddy_proxy_compose_render.changed
-  changed_when: false
-- name: Apply Caddy stack when needed  # noqa command-instead-of-module
-  ansible.builtin.command:
-    cmd: >-
-      docker compose --ansi never
-      -f {{ caddy_proxy_compose_file }}
+      docker compose -f {{ caddy_proxy_compose_file }}
       up -d --remove-orphans
+      {% if caddy_proxy_compose_pull in ['missing', 'always'] %}
+      --pull {{ caddy_proxy_compose_pull }}
+      {% endif %}
+  args:
     chdir: "{{ caddy_proxy_project_path }}"
-  register: caddy_proxy_compose_apply
-  when: caddy_proxy_compose_should_apply
+  register: caddy_proxy_compose
+  failed_when: caddy_proxy_compose.rc != 0
   changed_when: >-
-    caddy_proxy_compose_apply.rc == 0 and
-    ('is up-to-date' not in (
-      caddy_proxy_compose_apply.stdout + caddy_proxy_compose_apply.stderr
-    ))
-  failed_when: caddy_proxy_compose_apply.rc != 0
+    caddy_proxy_compose.rc == 0 and (
+      caddy_proxy_compose.stdout is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+      or caddy_proxy_compose.stderr is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+    )

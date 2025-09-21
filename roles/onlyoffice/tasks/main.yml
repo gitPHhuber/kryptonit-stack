@@ -21,75 +21,23 @@
     src: docker-compose.yml.j2
     dest: "{{ onlyoffice_project_path }}/{{ onlyoffice_compose_file }}"
     mode: '0644'
-  register: onlyoffice_compose_template
+  notify: Apply OnlyOffice stack
 
-
-- name: Assume OnlyOffice stack is healthy
-  ansible.builtin.set_fact:
-    onlyoffice_compose_should_apply: false
-  changed_when: false
-
-- name: Inspect current OnlyOffice stack status
+- name: Ensure OnlyOffice stack is running  # noqa command-instead-of-module
   ansible.builtin.command:
     cmd: >-
-      docker compose --ansi never
-      -f {{ onlyoffice_compose_file }}
-      ps --format json
-    chdir: "{{ onlyoffice_project_path }}"
-  register: onlyoffice_compose_status
-  changed_when: false
-  failed_when: onlyoffice_compose_status.rc not in [0, 1]
-
-- name: Parse OnlyOffice compose status output
-  ansible.builtin.set_fact:
-    onlyoffice_compose_containers: >-
-      {{ onlyoffice_compose_status.stdout | from_json }}
-  when:
-    - onlyoffice_compose_status.rc == 0
-    - onlyoffice_compose_status.stdout | trim | length > 0
-  changed_when: false
-
-- name: Mark OnlyOffice stack for apply when status command fails
-  ansible.builtin.set_fact:
-    onlyoffice_compose_should_apply: true
-  when: onlyoffice_compose_status.rc != 0
-  changed_when: false
-
-- name: Mark OnlyOffice stack for apply when no containers are present
-  ansible.builtin.set_fact:
-    onlyoffice_compose_should_apply: true
-  when:
-    - onlyoffice_compose_status.rc == 0
-    - onlyoffice_compose_containers | default([]) | length == 0
-  changed_when: false
-
-- name: Mark OnlyOffice stack for apply when containers are not running
-  ansible.builtin.set_fact:
-    onlyoffice_compose_should_apply: true
-  when:
-    - onlyoffice_compose_status.rc == 0
-    - >-
-      (onlyoffice_compose_containers | default([])
-       | selectattr('State', 'ne', 'running')
-       | list | length) > 0
-  changed_when: false
-- name: Mark OnlyOffice stack when config changes  # noqa no-handler
-  ansible.builtin.set_fact:
-    onlyoffice_compose_should_apply: true
-  when: onlyoffice_compose_template.changed
-  changed_when: false
-- name: Apply OnlyOffice stack when needed  # noqa command-instead-of-module
-  ansible.builtin.command:
-    cmd: >-
-      docker compose --ansi never
-      -f {{ onlyoffice_compose_file }}
+      docker compose -f {{ onlyoffice_compose_file }}
       up -d --remove-orphans
+  args:
     chdir: "{{ onlyoffice_project_path }}"
-  register: onlyoffice_compose_apply
-  when: onlyoffice_compose_should_apply
+  register: onlyoffice_compose
+  failed_when: onlyoffice_compose.rc != 0
   changed_when: >-
-    onlyoffice_compose_apply.rc == 0 and
-    ('is up-to-date' not in (
-      onlyoffice_compose_apply.stdout + onlyoffice_compose_apply.stderr
-    ))
-  failed_when: onlyoffice_compose_apply.rc != 0
+    onlyoffice_compose.rc == 0 and (
+      onlyoffice_compose.stdout is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+      or onlyoffice_compose.stderr is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+    )

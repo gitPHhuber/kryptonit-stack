@@ -1,2 +1,23 @@
 ---
-# Handlers for the Caddy proxy role
+- name: Apply Caddy stack  # noqa command-instead-of-module
+  listen: Apply Caddy stack
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f {{ caddy_proxy_compose_file }}
+      up -d --remove-orphans
+      {% if caddy_proxy_compose_pull in ['missing', 'always'] %}
+      --pull {{ caddy_proxy_compose_pull }}
+      {% endif %}
+  args:
+    chdir: "{{ caddy_proxy_project_path }}"
+  register: caddy_proxy_compose_handler
+  failed_when: caddy_proxy_compose_handler.rc != 0
+  changed_when: >-
+    caddy_proxy_compose_handler.rc == 0 and (
+      caddy_proxy_compose_handler.stdout is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+      or caddy_proxy_compose_handler.stderr is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+    )

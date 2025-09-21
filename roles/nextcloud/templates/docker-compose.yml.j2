@@ -32,10 +32,8 @@ services:
     container_name: nextcloud-redis
     command:
       - "redis-server"
-      - "--save"
-      - ""
       - "--appendonly"
-      - "no"
+      - "yes"
     volumes:
       - ./redis:/data
     networks:

@@ -1,9 +1,23 @@
 ---
-- name: Restart Nextcloud stack  # noqa command-instead-of-module
+- name: Apply Nextcloud stack  # noqa command-instead-of-module
+  listen: Apply Nextcloud stack
   ansible.builtin.command:
     cmd: >-
-      docker compose --ansi never
-      -f {{ nextcloud_compose_file }}
+      docker compose -f {{ nextcloud_compose_file }}
       up -d --remove-orphans
+      {% if nextcloud_compose_pull in ['missing', 'always'] %}
+      --pull {{ nextcloud_compose_pull }}
+      {% endif %}
+  args:
     chdir: "{{ nextcloud_project_path }}"
-  changed_when: true
+  register: nextcloud_compose_handler
+  failed_when: nextcloud_compose_handler.rc != 0
+  changed_when: >-
+    nextcloud_compose_handler.rc == 0 and (
+      nextcloud_compose_handler.stdout is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+      or nextcloud_compose_handler.stderr is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+    )
