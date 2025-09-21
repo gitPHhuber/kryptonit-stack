@@ -102,7 +102,6 @@
        | selectattr('State', 'ne', 'running')
        | list | length) > 0
   changed_when: false
-
 - name: Mark Caddy stack for apply when configuration changed
   ansible.builtin.set_fact:
     caddy_compose_should_apply: true
