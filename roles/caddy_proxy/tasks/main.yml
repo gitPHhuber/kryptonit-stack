@@ -109,6 +109,7 @@
   when: caddyfile_result.changed or caddy_compose_file.changed
   changed_when: false
 
+
 - name: Apply Caddy stack when needed  # noqa command-instead-of-module
   ansible.builtin.command:
     cmd: >-
@@ -124,3 +125,4 @@
       caddy_compose_apply.stdout + caddy_compose_apply.stderr
     ))
   failed_when: caddy_compose_apply.rc != 0
+

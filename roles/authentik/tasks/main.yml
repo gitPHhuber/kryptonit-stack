@@ -96,3 +96,4 @@
       authentik_compose_apply.stdout + authentik_compose_apply.stderr
     ))
   failed_when: authentik_compose_apply.rc != 0
+

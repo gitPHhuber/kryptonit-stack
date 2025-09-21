@@ -4,3 +4,4 @@ nextcloud_compose_file: docker-compose.yml
 nextcloud_fs_owner: www-data
 nextcloud_fs_group: www-data
 nextcloud_fs_mode: '0750'
+nextcloud_compose_pull: missing

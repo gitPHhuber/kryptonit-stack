@@ -11,6 +11,7 @@
 
 ## Requirements
 
+
 ### Контролирующая машина
 
 - Linux/macOS/WSL с Python **3.10+**.
@@ -124,3 +125,4 @@ CI-пайплайн [.github/workflows/lint.yml](.github/workflows/lint.yml) а�
 - **Docker compose:** при ошибках вида `docker: 'compose' is not a docker command` установите плагин Docker Compose v2 и убедитесь, что бинарь `docker` доступен в `PATH`.
 
 Дополнительную информацию ищите в официальной документации Ansible: [docs.ansible.com](https://docs.ansible.com/) и коллекции [community.docker](https://docs.ansible.com/ansible/latest/collections/community/docker/index.html).
+

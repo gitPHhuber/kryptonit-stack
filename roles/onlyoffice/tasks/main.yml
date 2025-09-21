@@ -23,6 +23,7 @@
     mode: '0644'
   register: onlyoffice_compose_template
 
+
 - name: Assume OnlyOffice stack is healthy
   ansible.builtin.set_fact:
     onlyoffice_compose_should_apply: false
@@ -94,3 +95,4 @@
       onlyoffice_compose_apply.stdout + onlyoffice_compose_apply.stderr
     ))
   failed_when: onlyoffice_compose_apply.rc != 0
+

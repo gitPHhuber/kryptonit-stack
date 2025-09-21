@@ -7,3 +7,4 @@
       up -d --remove-orphans
     chdir: "{{ nextcloud_project_path }}"
   changed_when: true
+

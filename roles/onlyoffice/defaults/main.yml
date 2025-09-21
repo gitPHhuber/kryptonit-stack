@@ -2,3 +2,4 @@
 # Default variables for the OnlyOffice role
 onlyoffice_project_path: /opt/onlyoffice
 onlyoffice_compose_file: docker-compose.yml
+
