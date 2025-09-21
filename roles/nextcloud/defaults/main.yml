@@ -1,0 +1,4 @@
+---
+nextcloud_fs_owner: www-data
+nextcloud_fs_group: www-data
+nextcloud_fs_mode: '0750'

@@ -5,6 +5,16 @@
     state: directory
     mode: '0755'
 
+- name: Ensure OnlyOffice data directories
+  file:
+    path: "/opt/onlyoffice/{{ item }}"
+    state: directory
+    mode: '0750'
+  loop:
+    - data
+    - log
+    - lib
+
 # roles/onlyoffice/templates/docker-compose.yml.j2 должен существовать
 - name: Render OnlyOffice docker-compose.yml
   template:
@@ -12,7 +22,7 @@
     dest: /opt/onlyoffice/docker-compose.yml
     mode: '0644'
 
-- name: Run OnlyOffice stack (local HTTP {{ onlyoffice_port }})
+- name: Run OnlyOffice stack
   community.docker.docker_compose_v2:
     project_src: /opt/onlyoffice
     state: present

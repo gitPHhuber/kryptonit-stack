@@ -1,41 +1,104 @@
 services:
-  postgres:
+  authentik-postgres:
     image: postgres:15
+    container_name: authentik-postgres
     environment:
       POSTGRES_USER: "{{ ak_db_user | default('authentik') }}"
       POSTGRES_PASSWORD: "{{ ak_db_password }}"
       POSTGRES_DB: "{{ ak_db_name | default('authentik') }}"
     volumes:
       - ./postgres:/var/lib/postgresql/data
+    networks:
+      - infra
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ ak_db_user | default('authentik') }} -d {{ ak_db_name | default('authentik') }} -h 127.0.0.1 -p 5432"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
-  redis:
+  authentik-redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    container_name: authentik-redis
+    command:
+      - "redis-server"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+      - "--requirepass"
+      - "{{ authentik_redis_password }}"
     volumes:
       - ./redis:/data
+    networks:
+      - infra
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "{{ authentik_redis_password }}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
-  server:
+  authentik-server:
     image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-server
     depends_on:
-      - postgres
-      - redis
+      authentik-postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
     environment:
-      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
       AUTHENTIK_POSTGRESQL__USER: "{{ ak_db_user | default('authentik') }}"
       AUTHENTIK_POSTGRESQL__NAME: "{{ ak_db_name | default('authentik') }}"
       AUTHENTIK_POSTGRESQL__PASSWORD: "{{ ak_db_password }}"
-      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_REDIS__PASSWORD: "{{ authentik_redis_password }}"
+      AUTHENTIK_SECRET_KEY: "{{ ak_secret_key }}"
       # bootstrap админ:
       AUTHENTIK_BOOTSTRAP_EMAIL: "{{ ak_bootstrap.email }}"
       AUTHENTIK_BOOTSTRAP_PASSWORD: "{{ ak_bootstrap.password }}"
       AUTHENTIK_BOOTSTRAP_TOKEN: "{{ ak_bootstrap.token | default('') }}"
       # base URL (через Caddy)
       AUTHENTIK_HOST: "https://{{ auth_fqdn }}"
-    ports:
-      - "127.0.0.1:{{ authentik_port }}:9000"
     volumes:
       - ./media:/media
       - ./config:/config
+    networks:
+      - infra
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/-/health/ready || wget -q --spider http://127.0.0.1:9000/-/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-worker
+    command: worker
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+    environment:
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
+      AUTHENTIK_POSTGRESQL__USER: "{{ ak_db_user | default('authentik') }}"
+      AUTHENTIK_POSTGRESQL__NAME: "{{ ak_db_name | default('authentik') }}"
+      AUTHENTIK_POSTGRESQL__PASSWORD: "{{ ak_db_password }}"
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_REDIS__PASSWORD: "{{ authentik_redis_password }}"
+      AUTHENTIK_SECRET_KEY: "{{ ak_secret_key }}"
+      AUTHENTIK_HOST: "https://{{ auth_fqdn }}"
+    volumes:
+      - ./media:/media
+      - ./config:/config
+    networks:
+      - infra
+    restart: unless-stopped
+
+networks:
+  infra:
+    external: true
+    name: {{ docker_infra_network }}
