@@ -18,6 +18,7 @@
     owner: root
     group: root
     mode: '0644'
+  register: caddyfile_result
 
 - name: Write docker-compose.yml for Caddy
   ansible.builtin.copy:
@@ -50,9 +51,78 @@
         infra:
           external: true
           name: {{ docker_infra_network }}
+  register: caddy_compose_file
 
-- name: Run Caddy via compose
-  community.docker.docker_compose_v2:
-    project_src: "{{ caddy_proxy_project_path }}"
-    state: present
-    pull: "{{ caddy_proxy_compose_pull }}"
+- name: Assume Caddy stack is healthy
+  ansible.builtin.set_fact:
+    caddy_compose_should_apply: false
+  changed_when: false
+
+- name: Inspect current Caddy stack status
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --ansi never
+      -f {{ caddy_proxy_compose_file }}
+      ps --format json
+    chdir: "{{ caddy_proxy_project_path }}"
+  register: caddy_compose_status
+  changed_when: false
+  failed_when: caddy_compose_status.rc not in [0, 1]
+
+- name: Parse Caddy compose status output
+  ansible.builtin.set_fact:
+    caddy_compose_containers: >-
+      {{ caddy_compose_status.stdout | from_json }}
+  when:
+    - caddy_compose_status.rc == 0
+    - caddy_compose_status.stdout | trim | length > 0
+  changed_when: false
+
+- name: Mark Caddy stack for apply when status command fails
+  ansible.builtin.set_fact:
+    caddy_compose_should_apply: true
+  when: caddy_compose_status.rc != 0
+  changed_when: false
+
+- name: Mark Caddy stack for apply when no containers are present
+  ansible.builtin.set_fact:
+    caddy_compose_should_apply: true
+  when:
+    - caddy_compose_status.rc == 0
+    - caddy_compose_containers | default([]) | length == 0
+  changed_when: false
+
+- name: Mark Caddy stack for apply when containers are not running
+  ansible.builtin.set_fact:
+    caddy_compose_should_apply: true
+  when:
+    - caddy_compose_status.rc == 0
+    - >-
+      (caddy_compose_containers | default([])
+       | selectattr('State', 'ne', 'running')
+       | list | length) > 0
+  changed_when: false
+
+- name: Mark Caddy stack for apply when configuration changed
+  ansible.builtin.set_fact:
+    caddy_compose_should_apply: true
+  when: caddyfile_result.changed or caddy_compose_file.changed
+  changed_when: false
+
+
+- name: Apply Caddy stack when needed  # noqa command-instead-of-module
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --ansi never
+      -f {{ caddy_proxy_compose_file }}
+      up -d --remove-orphans
+    chdir: "{{ caddy_proxy_project_path }}"
+  register: caddy_compose_apply
+  when: caddy_compose_should_apply
+  changed_when: >-
+    caddy_compose_apply.rc == 0 and
+    ('is up-to-date' not in (
+      caddy_compose_apply.stdout + caddy_compose_apply.stderr
+    ))
+  failed_when: caddy_compose_apply.rc != 0
+

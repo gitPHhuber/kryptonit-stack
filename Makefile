@@ -1,5 +1,8 @@
 ANSIBLE ?= ansible-playbook
-INVENTORY ?= inventory/dev/hosts.ini
+
+INVENTORY ?= inventory/local.ini
+
+
 PLAYBOOK ?= site.yml
 
 .PHONY: deps lint run vault

@@ -5,9 +5,20 @@
       - ansible_os_family in ['Debian']
     fail_msg: "Currently only Debian/Ubuntu family is supported."
 
-- name: Set timezone
-  community.general.timezone:
-    name: "{{ timezone }}"
+- name: Read current timezone
+  ansible.builtin.command:
+    cmd: timedatectl show -p Timezone --value
+  register: current_timezone
+  changed_when: false
+  failed_when: current_timezone.rc != 0
+
+- name: Set timezone  # noqa command-instead-of-module
+  ansible.builtin.command:
+    cmd: "timedatectl set-timezone {{ timezone }}"
+  when: current_timezone.stdout.strip() != timezone
+  register: timezone_set
+  changed_when: timezone_set.rc == 0
+  failed_when: timezone_set.rc != 0
 
 - name: Install prerequisites
   ansible.builtin.apt:
@@ -49,10 +60,26 @@
     owner: root
     group: root
     mode: '0644'
+
   when: ansible_os_family == 'Debian'
 
-- name: Install Docker Engine
+- name: Refresh apt cache after adding Docker repo
   ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+  when: ansible_os_family == 'Debian'
+
+- name: Check if docker-ce is available in APT
+  ansible.builtin.command: apt-cache policy docker-ce
+  register: ce_policy
+  changed_when: false
+  failed_when: false
+  when: ansible_os_family == 'Debian'
+
+- name: Install Docker CE stack (official repo)
+  ansible.builtin.apt:
+    update_cache: true
+
     name:
       - docker-ce
       - docker-ce-cli
@@ -60,16 +87,38 @@
       - docker-buildx-plugin
       - docker-compose-plugin
     state: present
-    update_cache: true
-  when: ansible_os_family == 'Debian'
+  when:
+    - ansible_os_family == 'Debian'
+    - ce_policy.stdout is search('Candidate:\\s+(?!none)')
+  register: ce_install
 
-- name: Ensure docker service enabled
-  ansible.builtin.systemd:
+- name: Install Docker from Ubuntu repo (docker.io)
+  ansible.builtin.apt:
+    update_cache: true
+    name: docker.io
+    state: present
+  when:
+    - ansible_os_family == 'Debian'
+    - ce_policy.stdout is search('Candidate:\\s+none')
+
+- name: Ensure docker service is enabled & started
+  ansible.builtin.service:
+
     name: docker
     state: started
     enabled: true
 
-- name: Ensure shared Docker network exists
-  community.docker.docker_network:
-    name: "{{ docker_infra_network }}"
-    state: present
+- name: Check if Docker network exists
+  ansible.builtin.command:
+    cmd: "docker network inspect {{ docker_infra_network }}"
+  register: docker_network_inspect
+  changed_when: false
+  failed_when: docker_network_inspect.rc not in [0, 1]
+
+- name: Create shared Docker network  # noqa command-instead-of-module
+  ansible.builtin.command:
+    cmd: "docker network create {{ docker_infra_network }}"
+  when: docker_network_inspect.rc != 0
+  register: docker_network_create
+  changed_when: docker_network_create.rc == 0
+  failed_when: docker_network_create.rc != 0
