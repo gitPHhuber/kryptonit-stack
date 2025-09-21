@@ -1,2 +1,23 @@
 ---
-# Handlers for the Authentik role
+- name: Apply Authentik stack  # noqa command-instead-of-module
+  listen: Apply Authentik stack
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f {{ authentik_compose_file }}
+      up -d --remove-orphans
+      {% if authentik_compose_pull in ['missing', 'always'] %}
+      --pull {{ authentik_compose_pull }}
+      {% endif %}
+  args:
+    chdir: "{{ authentik_project_path }}"
+  register: authentik_compose_handler
+  failed_when: authentik_compose_handler.rc != 0
+  changed_when: >-
+    authentik_compose_handler.rc == 0 and (
+      authentik_compose_handler.stdout is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+      or authentik_compose_handler.stderr is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+    )

@@ -23,75 +23,26 @@
     src: docker-compose.yml.j2
     dest: "{{ authentik_project_path }}/{{ authentik_compose_file }}"
     mode: '0644'
-  register: authentik_compose_template
+  notify: Apply Authentik stack
 
-- name: Assume Authentik stack is healthy
-  ansible.builtin.set_fact:
-    authentik_compose_should_apply: false
-  changed_when: false
-
-- name: Inspect current Authentik stack status
+- name: Ensure Authentik stack is running  # noqa command-instead-of-module
   ansible.builtin.command:
     cmd: >-
-      docker compose --ansi never
-      -f {{ authentik_compose_file }}
-      ps --format json
-    chdir: "{{ authentik_project_path }}"
-  register: authentik_compose_status
-  changed_when: false
-  failed_when: authentik_compose_status.rc not in [0, 1]
-
-- name: Parse Authentik compose status output
-  ansible.builtin.set_fact:
-    authentik_compose_containers: >-
-      {{ authentik_compose_status.stdout | from_json }}
-  when:
-    - authentik_compose_status.rc == 0
-    - authentik_compose_status.stdout | trim | length > 0
-  changed_when: false
-
-- name: Mark Authentik stack for apply when status command fails
-  ansible.builtin.set_fact:
-    authentik_compose_should_apply: true
-  when: authentik_compose_status.rc != 0
-  changed_when: false
-
-- name: Mark Authentik stack for apply when no containers are present
-  ansible.builtin.set_fact:
-    authentik_compose_should_apply: true
-  when:
-    - authentik_compose_status.rc == 0
-    - authentik_compose_containers | default([]) | length == 0
-  changed_when: false
-
-- name: Mark Authentik stack for apply when containers are not running
-  ansible.builtin.set_fact:
-    authentik_compose_should_apply: true
-  when:
-    - authentik_compose_status.rc == 0
-    - >-
-      (authentik_compose_containers | default([])
-       | selectattr('State', 'ne', 'running')
-       | list | length) > 0
-  changed_when: false
-
-- name: Mark Authentik stack when config changes  # noqa no-handler
-  ansible.builtin.set_fact:
-    authentik_compose_should_apply: true
-  when: authentik_compose_template.changed
-  changed_when: false
-- name: Apply Authentik stack when needed  # noqa command-instead-of-module
-  ansible.builtin.command:
-    cmd: >-
-      docker compose --ansi never
-      -f {{ authentik_compose_file }}
+      docker compose -f {{ authentik_compose_file }}
       up -d --remove-orphans
+      {% if authentik_compose_pull in ['missing', 'always'] %}
+      --pull {{ authentik_compose_pull }}
+      {% endif %}
+  args:
     chdir: "{{ authentik_project_path }}"
-  register: authentik_compose_apply
-  when: authentik_compose_should_apply
+  register: authentik_compose
+  failed_when: authentik_compose.rc != 0
   changed_when: >-
-    authentik_compose_apply.rc == 0 and
-    ('is up-to-date' not in (
-      authentik_compose_apply.stdout + authentik_compose_apply.stderr
-    ))
-  failed_when: authentik_compose_apply.rc != 0
+    authentik_compose.rc == 0 and (
+      authentik_compose.stdout is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+      or authentik_compose.stderr is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+    )

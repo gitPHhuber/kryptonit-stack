@@ -1,0 +1,17 @@
+services:
+  {{ private_ca_service_name }}:
+    image: {{ private_ca_image }}
+    container_name: {{ private_ca_service_name }}
+    environment:
+      STEP_CA_PASSWORD: "{{ private_ca_password }}"
+    volumes:
+      - ./config:/home/step
+    ports:
+      - "127.0.0.1:{{ private_ca_listen_port }}:{{ private_ca_listen_port }}"
+    networks:
+      - infra
+    restart: unless-stopped
+networks:
+  infra:
+    external: true
+    name: {{ docker_infra_network }}

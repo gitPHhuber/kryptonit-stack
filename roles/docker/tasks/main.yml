@@ -146,17 +146,16 @@
     state: started
     enabled: true
 
-- name: Check if Docker network exists
+- name: Inspect shared Docker network
   ansible.builtin.command:
     cmd: "docker network inspect {{ docker_infra_network }}"
   register: docker_network_inspect
   changed_when: false
-  failed_when: docker_network_inspect.rc not in [0, 1]
+  failed_when: false
 
-- name: Create shared Docker network  # noqa command-instead-of-module
+- name: Ensure shared Docker network exists  # noqa command-instead-of-module
   ansible.builtin.command:
     cmd: "docker network create {{ docker_infra_network }}"
   when: docker_network_inspect.rc != 0
   register: docker_network_create
   changed_when: docker_network_create.rc == 0
-  failed_when: docker_network_create.rc != 0

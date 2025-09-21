@@ -1,0 +1,23 @@
+---
+- name: Apply private CA stack  # noqa command-instead-of-module
+  listen: Apply private CA stack
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f {{ private_ca_compose_file }}
+      up -d --remove-orphans
+      {% if private_ca_compose_pull in ['missing', 'always'] %}
+      --pull {{ private_ca_compose_pull }}
+      {% endif %}
+  args:
+    chdir: "{{ private_ca_project_path }}"
+  register: private_ca_compose_handler
+  failed_when: private_ca_compose_handler.rc != 0
+  changed_when: >-
+    private_ca_compose_handler.rc == 0 and (
+      private_ca_compose_handler.stdout is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+      or private_ca_compose_handler.stderr is search(
+        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
+      )
+    )

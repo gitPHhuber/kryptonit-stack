@@ -3,6 +3,10 @@
   hosts: proxyhost
   become: true
   roles:
+    - role: private_ca
+      tags:
+        - private-ca
+        - tls
     - role: caddy_proxy
       tags:
         - caddy
