@@ -5,7 +5,7 @@
     state: directory
     mode: '0755'
 
-- name: Ensure Nextcloud data directories
+- name: Ensure Nextcloud application directories
   ansible.builtin.file:
     path: "/opt/nextcloud/{{ item }}"
     state: directory
@@ -16,8 +16,17 @@
     - data
     - apps
     - config
-    - db
-    - redis
+
+- name: Ensure Nextcloud service state directories
+  ansible.builtin.file:
+    path: "/opt/nextcloud/{{ item.name }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { name: "db", owner: "root", group: "root", mode: "0750" }
+    - { name: "redis", owner: "root", group: "root", mode: "0750" }
 
 - name: Render Redis config snippet
   ansible.builtin.template:

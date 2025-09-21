@@ -90,7 +90,7 @@ services:
     entrypoint: /cron.sh
     depends_on:
       nextcloud-app:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./data:/var/www/html
       - ./apps:/var/www/html/custom_apps

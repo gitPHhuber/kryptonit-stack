@@ -1,0 +1,4 @@
+---
+# Обратная совместимость: основной плейбук переехал в ansible/site.yml
+- name: Include primary stack playbook
+  import_playbook: ansible/site.yml

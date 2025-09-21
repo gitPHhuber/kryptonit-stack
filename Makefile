@@ -12,7 +12,10 @@ ANSIBLE_LINT := $(BIN)/ansible-lint
 
 INVENTORY := ansible/inventory.ini
 PLAYBOOK := ansible/site.yml
-REQ := ansible/requirements.yml
+REQ := $(if $(wildcard ansible/requirements.yml),ansible/requirements.yml,requirements.yml)
+
+# дополнительные параметры для ansible-playbook, например --tags, --limit и т.п.
+PLAYBOOK_OPTS ?=
 
 bootstrap:
 	@which $(PY) >/dev/null 2>&1 || (echo "python3 не найден" && exit 1)
@@ -28,13 +31,13 @@ lint: bootstrap
 	@$(ANSIBLE_LINT) -p
 
 syntax: deps
-	@$(ANSIBLE_PLAYBOOK) -i $(INVENTORY) $(PLAYBOOK) --syntax-check
+	@$(ANSIBLE_PLAYBOOK) $(PLAYBOOK_OPTS) -i $(INVENTORY) --syntax-check $(PLAYBOOK)
 
 check: deps
-	@ANSIBLE_STDOUT_CALLBACK=yaml $(ANSIBLE_PLAYBOOK) -i $(INVENTORY) $(PLAYBOOK) --check
+	@ANSIBLE_STDOUT_CALLBACK=yaml $(ANSIBLE_PLAYBOOK) $(PLAYBOOK_OPTS) -i $(INVENTORY) --check $(PLAYBOOK)
 
 run: deps
-	@ANSIBLE_STDOUT_CALLBACK=yaml $(ANSIBLE_PLAYBOOK) -i $(INVENTORY) $(PLAYBOOK)
+	@ANSIBLE_STDOUT_CALLBACK=yaml $(ANSIBLE_PLAYBOOK) $(PLAYBOOK_OPTS) -i $(INVENTORY) $(PLAYBOOK)
 
 clean:
-	@rm -rf $(VENV) .cache __pycache__
+	@rm -rf $(VENV) .cache __pycache__ .ansible_tmp

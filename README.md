@@ -58,6 +58,12 @@ Caddy слушает 80/443 и проксирует к внутренним ко
 make run
 ```
 
+Перед запуском можно передать дополнительные опции Ansible через переменную `PLAYBOOK_OPTS`, например указать теги или лимит хостов:
+
+```bash
+make run PLAYBOOK_OPTS="--tags nextcloud --limit cloudhost"
+```
+
 Плейбук выполнит следующие шаги:
 
 1. Установит Docker Engine и создаст сеть `infra_internal`.

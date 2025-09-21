@@ -1,0 +1,6 @@
+---
+# Дублирует ansible/requirements.yml для обратной совместимости с внешними инструментами
+collections:
+  - name: community.docker
+  - name: ansible.posix
+  - name: community.general
