@@ -73,13 +73,11 @@
        | selectattr('State', 'ne', 'running')
        | list | length) > 0
   changed_when: false
-
 - name: Mark OnlyOffice stack when config changes  # noqa no-handler
   ansible.builtin.set_fact:
     onlyoffice_compose_should_apply: true
   when: onlyoffice_compose_template.changed
   changed_when: false
-
 - name: Apply OnlyOffice stack when needed  # noqa command-instead-of-module
   ansible.builtin.command:
     cmd: >-
@@ -95,4 +93,3 @@
       onlyoffice_compose_apply.stdout + onlyoffice_compose_apply.stderr
     ))
   failed_when: onlyoffice_compose_apply.rc != 0
-

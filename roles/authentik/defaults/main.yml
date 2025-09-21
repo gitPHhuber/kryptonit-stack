@@ -2,6 +2,4 @@
 # Default variables for the Authentik role
 authentik_project_path: /opt/authentik
 authentik_compose_file: docker-compose.yml
-
 authentik_compose_pull: missing
-
