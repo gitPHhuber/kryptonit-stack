@@ -17,12 +17,13 @@
 {{ auth_fqdn }} {
         import security_headers
         tls internal
-        reverse_proxy http://{{ authentik_upstream }}
-        health_checks {
-                active {
-                        path /-/health/ready/
-                        interval 15s
-                        timeout 2s
+        reverse_proxy http://{{ authentik_upstream }} {
+                health_checks {
+                        active {
+                                path /-/health/ready/
+                                interval 15s
+                                timeout 2s
+                        }
                 }
         }
 }
@@ -34,12 +35,13 @@
         encode zstd gzip
         rewrite /.well-known/carddav /remote.php/dav
         rewrite /.well-known/caldav /remote.php/dav
-        reverse_proxy http://{{ nextcloud_upstream }}
-        health_checks {
-                active {
-                        path /status.php
-                        interval 15s
-                        timeout 2s
+        reverse_proxy http://{{ nextcloud_upstream }} {
+                health_checks {
+                        active {
+                                path /status.php
+                                interval 15s
+                                timeout 2s
+                        }
                 }
         }
 }
@@ -48,12 +50,13 @@
 {{ onlyoffice_fqdn }} {
         import security_headers
         tls internal
-        reverse_proxy http://{{ onlyoffice_upstream }}
-        health_checks {
-                active {
-                        path /healthcheck
-                        interval 15s
-                        timeout 2s
+        reverse_proxy http://{{ onlyoffice_upstream }} {
+                health_checks {
+                        active {
+                                path /healthcheck
+                                interval 15s
+                                timeout 2s
+                        }
                 }
         }
 }
