@@ -1,0 +1,6 @@
+---
+skip_list:
+  - internal-error
+exclude_paths:
+  - .venv/
+  - group_vars/secrets.vault.yml

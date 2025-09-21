@@ -1,0 +1,20 @@
+---
+extends: default
+
+ignore: |
+  .venv/
+  group_vars/secrets.vault.yml
+
+rules:
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+  document-start: disable
+  line-length:
+    max: 200
+    level: warning

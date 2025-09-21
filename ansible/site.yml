@@ -1,0 +1,145 @@
+---
+- name: Ensure Docker on all hosts
+  hosts: all
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Stop unattended-upgrades to avoid apt locks
+      ansible.builtin.service:
+        name: unattended-upgrades
+        state: stopped
+      register: stop_unattended_upgrades
+      failed_when: false
+      when: ansible_os_family == 'Debian'
+
+    - name: Wait for dpkg/apt locks to be released
+      ansible.builtin.shell: |
+        while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1; do
+          sleep 3
+        done
+      changed_when: false
+      when: ansible_os_family == 'Debian'
+
+    - name: Check for encrypted secrets file
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../group_vars/secrets.vault.yml"
+      register: stack_secrets_vault
+      delegate_to: localhost
+      run_once: true  # noqa run-once[task]
+
+    - name: Load encrypted secrets when available
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../group_vars/secrets.vault.yml"
+      when: stack_secrets_vault.stat.exists
+      register: stack_secrets_loaded
+      failed_when: false
+      no_log: true
+      delegate_to: localhost
+      delegate_facts: true
+      run_once: true  # noqa run-once[task]
+
+    - name: Normalise loaded secret facts
+      ansible.builtin.set_fact:
+        stack_loaded_secrets: "{{ stack_secrets_loaded.ansible_facts if stack_secrets_loaded is defined else {} }}"
+      delegate_to: localhost
+      delegate_facts: true
+      no_log: true
+      run_once: true  # noqa run-once[task]
+
+    - name: Define local secret cache directory
+      ansible.builtin.set_fact:
+        stack_secret_cache_dir: "{{ (lookup('env', 'XDG_CACHE_HOME') | default(lookup('env', 'HOME') ~ '/.cache', true)) ~ '/kryptonit-stack' }}"
+      delegate_to: localhost
+      delegate_facts: true
+      run_once: true  # noqa run-once[task]
+
+    - name: Ensure secret cache directory exists
+      ansible.builtin.file:
+        path: "{{ stack_secret_cache_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      run_once: true  # noqa run-once[task]
+
+    - name: Build stack secret values on control node
+      ansible.builtin.set_fact:
+        onlyoffice_jwt_secret: >-
+          {{ stack_loaded_secrets.onlyoffice_jwt_secret | default(
+             lookup('password', stack_secret_cache_dir ~ '/onlyoffice_jwt_secret length=40 chars=ascii_letters,digits'), true
+          ) }}
+        ak_db_password: >-
+          {{ stack_loaded_secrets.ak_db_password | default(
+             lookup('password', stack_secret_cache_dir ~ '/ak_db_password length=24 chars=ascii_letters,digits'), true
+          ) }}
+        ak_secret_key: >-
+          {{ stack_loaded_secrets.ak_secret_key | default(
+             lookup('password', stack_secret_cache_dir ~ '/ak_secret_key length=48 chars=ascii_letters,digits'), true
+          ) }}
+        authentik_redis_password: >-
+          {{ stack_loaded_secrets.authentik_redis_password | default(
+             lookup('password', stack_secret_cache_dir ~ '/authentik_redis_password length=24 chars=ascii_letters,digits'), true
+          ) }}
+        nc_db_password: >-
+          {{ stack_loaded_secrets.nc_db_password | default(
+             lookup('password', stack_secret_cache_dir ~ '/nc_db_password length=24 chars=ascii_letters,digits'), true
+          ) }}
+        nc_db_root_password: >-
+          {{ stack_loaded_secrets.nc_db_root_password | default(
+             lookup('password', stack_secret_cache_dir ~ '/nc_db_root_password length=24 chars=ascii_letters,digits'), true
+          ) }}
+        onlyoffice_jwt_header: "{{ stack_loaded_secrets.onlyoffice_jwt_header | default('Authorization') }}"
+        ak_bootstrap: "{{ stack_bootstrap | combine({
+          'email': stack_bootstrap.email | default('admin@' ~ base_domain),
+          'password': stack_bootstrap.password | default(
+            lookup('password', stack_secret_cache_dir ~ '/ak_bootstrap_password length=20 chars=ascii_letters,digits'), true
+          ),
+          'token': stack_bootstrap.token | default('')
+        }, recursive=True) }}"
+      vars:
+        stack_bootstrap: "{{ stack_loaded_secrets.ak_bootstrap | default({}) }}"
+      delegate_to: localhost
+      delegate_facts: true
+      no_log: true
+      run_once: true  # noqa run-once[task]
+
+    - name: Distribute stack secrets to every host
+      ansible.builtin.set_fact:
+        onlyoffice_jwt_secret: "{{ hostvars['localhost'].onlyoffice_jwt_secret }}"
+        ak_db_password: "{{ hostvars['localhost'].ak_db_password }}"
+        ak_secret_key: "{{ hostvars['localhost'].ak_secret_key }}"
+        authentik_redis_password: "{{ hostvars['localhost'].authentik_redis_password }}"
+        nc_db_password: "{{ hostvars['localhost'].nc_db_password }}"
+        nc_db_root_password: "{{ hostvars['localhost'].nc_db_root_password }}"
+        onlyoffice_jwt_header: "{{ hostvars['localhost'].onlyoffice_jwt_header }}"
+        ak_bootstrap: "{{ hostvars['localhost'].ak_bootstrap }}"
+      no_log: true
+  roles:
+    - docker
+  post_tasks:
+    - name: Start unattended-upgrades
+      ansible.builtin.service:
+        name: unattended-upgrades
+        state: started
+      register: start_unattended_upgrades
+      failed_when: false
+      when: ansible_os_family == 'Debian'
+
+- name: Central TLS reverse proxy (Caddy)
+  hosts: proxyhost
+  roles:
+    - caddy_proxy
+
+- name: Authentik SSO
+  hosts: authhost
+  roles:
+    - authentik
+
+- name: Nextcloud
+  hosts: cloudhost
+  roles:
+    - nextcloud
+
+- name: OnlyOffice DocumentServer
+  hosts: officehost
+  roles:
+    - onlyoffice

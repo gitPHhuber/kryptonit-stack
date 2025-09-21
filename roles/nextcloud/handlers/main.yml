@@ -1,5 +1,5 @@
 ---
-- name: restart nextcloud stack
+- name: Restart Nextcloud stack
   community.docker.docker_compose_v2:
     project_src: /opt/nextcloud
     state: restarted

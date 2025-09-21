@@ -1,43 +1,71 @@
 {
-	# email используется для ACME-аккаунта; с tls internal не критично
-	email {{ letsencrypt_email }}
+        email {{ caddy_admin_email }}
+        # оставим авто-редиректы включёнными по умолчанию
+}
+
+(security_headers) {
+        header {
+                Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+                X-Content-Type-Options "nosniff"
+                Referrer-Policy "no-referrer-when-downgrade"
+                Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        # CSP: разрешаем связку Nextcloud <-> OnlyOffice и SSO через Authentik
+        # Важно для iframe/WS и предпросмотра документов
+        Content-Security-Policy "
+          default-src 'self';
+          img-src 'self' data: blob:;
+          media-src 'self' data: blob:;
+          font-src 'self' data:;
+          style-src 'self' 'unsafe-inline';
+          script-src 'self' 'unsafe-eval';
+          connect-src 'self' https://{{ nextcloud_fqdn }} https://{{ onlyoffice_fqdn }} https://{{ auth_fqdn }} wss://{{ onlyoffice_fqdn }};
+          frame-ancestors 'self' https://{{ auth_fqdn }} https://{{ nextcloud_fqdn }};
+          frame-src 'self' https://{{ onlyoffice_fqdn }} https://{{ auth_fqdn }};
+        "
+        }
 }
 
 # Authentik
 {{ auth_fqdn }} {
-	tls internal
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-		X-Frame-Options "SAMEORIGIN"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "strict-origin-when-cross-origin"
-	}
-	reverse_proxy http://{{ authentik_upstream }}
+        import security_headers
+        tls internal
+        reverse_proxy http://{{ authentik_upstream }}
+        health_checks {
+                active {
+                        path /-/health/ready/
+                        interval 15s
+                        timeout 2s
+                }
+        }
 }
 
 # Nextcloud
 {{ nextcloud_fqdn }} {
-	tls internal
-	encode zstd gzip
-	rewrite /.well-known/carddav /remote.php/dav
-	rewrite /.well-known/caldav /remote.php/dav
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-		X-Frame-Options "SAMEORIGIN"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "strict-origin-when-cross-origin"
-	}
-	reverse_proxy http://{{ nextcloud_upstream }}
+        import security_headers
+        tls internal
+        encode zstd gzip
+        rewrite /.well-known/carddav /remote.php/dav
+        rewrite /.well-known/caldav /remote.php/dav
+        reverse_proxy http://{{ nextcloud_upstream }}
+        health_checks {
+                active {
+                        path /status.php
+                        interval 15s
+                        timeout 2s
+                }
+        }
 }
 
 # OnlyOffice
 {{ onlyoffice_fqdn }} {
-	tls internal
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-		X-Frame-Options "SAMEORIGIN"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "strict-origin-when-cross-origin"
-	}
-	reverse_proxy http://{{ onlyoffice_upstream }}
+        import security_headers
+        tls internal
+        reverse_proxy http://{{ onlyoffice_upstream }}
+        health_checks {
+                active {
+                        path /healthcheck
+                        interval 15s
+                        timeout 2s
+                }
+        }
 }
