@@ -8,7 +8,7 @@ PLAYBOOK ?= site.yml
 .PHONY: deps lint run vault
 
 deps:
-	ansible-galaxy collection install -r requirements.yml
+	ansible-galaxy collection install --timeout 60 -r requirements.yml
 
 lint:
 	yamllint .
