@@ -1,16 +1,18 @@
-GALAXY=ansible-galaxy install -r requirements.yml
-RUN=ansible-playbook site.yml
+ANSIBLE ?= ansible-playbook
+INVENTORY ?= inventory/local.ini
+PLAYBOOK ?= site.yml
 
-all: deps vault run
+.PHONY: deps lint run vault
 
 deps:
-	$(GALAXY)
+	ansible-galaxy collection install -r requirements.yml
 
-vault:
-	@echo "Encrypting group_vars/secrets.vault.yml (you'll set a password)"
-	ansible-vault encrypt --encrypt-vault-id default group_vars/secrets.vault.yml || true
+lint:
+	yamllint .
+	ansible-lint --offline
 
 run:
-	$(RUN)
+	$(ANSIBLE) -i $(INVENTORY) $(PLAYBOOK)
 
-.PHONY: all deps run vault
+vault:
+	ansible-vault edit group_vars/dev/vault.yml

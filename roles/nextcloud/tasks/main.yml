@@ -1,13 +1,13 @@
 ---
 - name: Ensure Nextcloud project dir
-  file:
-    path: /opt/nextcloud
+  ansible.builtin.file:
+    path: "{{ nextcloud_project_path }}"
     state: directory
     mode: '0755'
 
 - name: Ensure Nextcloud data directories
-  file:
-    path: "/opt/nextcloud/{{ item }}"
+  ansible.builtin.file:
+    path: "{{ nextcloud_project_path }}/{{ item }}"
     state: directory
     owner: "{{ nextcloud_fs_owner }}"
     group: "{{ nextcloud_fs_group }}"
@@ -20,22 +20,90 @@
     - redis
 
 - name: Render Redis config snippet
-  template:
+  ansible.builtin.template:
     src: redis.config.php.j2
-    dest: /opt/nextcloud/config/redis.config.php
+    dest: "{{ nextcloud_project_path }}/config/redis.config.php"
     owner: "{{ nextcloud_fs_owner }}"
     group: "{{ nextcloud_fs_group }}"
     mode: '0640'
+  register: nextcloud_redis_config
 
 # roles/nextcloud/templates/docker-compose.yml.j2 должен существовать
 - name: Render Nextcloud docker-compose.yml
-  template:
+  ansible.builtin.template:
     src: docker-compose.yml.j2
-    dest: /opt/nextcloud/docker-compose.yml
+    dest: "{{ nextcloud_project_path }}/{{ nextcloud_compose_file }}"
     mode: '0644'
+  register: nextcloud_compose_template
 
-- name: Run Nextcloud stack
-  community.docker.docker_compose_v2:
-    project_src: /opt/nextcloud
-    state: present
-    pull: missing
+- name: Assume Nextcloud stack is healthy
+  ansible.builtin.set_fact:
+    nextcloud_compose_should_apply: false
+  changed_when: false
+
+- name: Inspect current Nextcloud stack status
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --ansi never
+      -f {{ nextcloud_compose_file }}
+      ps --format json
+    chdir: "{{ nextcloud_project_path }}"
+  register: nextcloud_compose_status
+  changed_when: false
+  failed_when: nextcloud_compose_status.rc not in [0, 1]
+
+- name: Parse Nextcloud compose status output
+  ansible.builtin.set_fact:
+    nextcloud_compose_containers: >-
+      {{ nextcloud_compose_status.stdout | from_json }}
+  when:
+    - nextcloud_compose_status.rc == 0
+    - nextcloud_compose_status.stdout | trim | length > 0
+  changed_when: false
+
+- name: Mark Nextcloud stack for apply when status command fails
+  ansible.builtin.set_fact:
+    nextcloud_compose_should_apply: true
+  when: nextcloud_compose_status.rc != 0
+  changed_when: false
+
+- name: Mark Nextcloud stack for apply when no containers are present
+  ansible.builtin.set_fact:
+    nextcloud_compose_should_apply: true
+  when:
+    - nextcloud_compose_status.rc == 0
+    - nextcloud_compose_containers | default([]) | length == 0
+  changed_when: false
+
+- name: Mark Nextcloud stack for apply when containers are not running
+  ansible.builtin.set_fact:
+    nextcloud_compose_should_apply: true
+  when:
+    - nextcloud_compose_status.rc == 0
+    - >-
+      (nextcloud_compose_containers | default([])
+       | selectattr('State', 'ne', 'running')
+       | list | length) > 0
+  changed_when: false
+
+- name: Mark Nextcloud stack for apply when configuration changed
+  ansible.builtin.set_fact:
+    nextcloud_compose_should_apply: true
+  when: nextcloud_redis_config.changed or nextcloud_compose_template.changed
+  changed_when: false
+
+- name: Apply Nextcloud stack when needed  # noqa command-instead-of-module
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --ansi never
+      -f {{ nextcloud_compose_file }}
+      up -d --remove-orphans
+    chdir: "{{ nextcloud_project_path }}"
+  register: nextcloud_compose_apply
+  when: nextcloud_compose_should_apply
+  changed_when: >-
+    nextcloud_compose_apply.rc == 0 and
+    ('is up-to-date' not in (
+      nextcloud_compose_apply.stdout + nextcloud_compose_apply.stderr
+    ))
+  failed_when: nextcloud_compose_apply.rc != 0
