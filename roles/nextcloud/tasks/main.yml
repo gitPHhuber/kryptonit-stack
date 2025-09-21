@@ -107,4 +107,3 @@
       nextcloud_compose_apply.stdout + nextcloud_compose_apply.stderr
     ))
   failed_when: nextcloud_compose_apply.rc != 0
-
