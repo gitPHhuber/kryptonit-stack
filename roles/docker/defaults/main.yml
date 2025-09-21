@@ -9,6 +9,8 @@ docker_repo_distribution_map:
   Debian: debian
   Ubuntu: ubuntu
 
+docker_repo_base_url: https://download.docker.com/linux
+
 # Shared user-defined Docker network name used by all stacks
 # override in inventory if needed
 docker_infra_network: infra_internal

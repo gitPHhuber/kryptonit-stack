@@ -64,7 +64,7 @@
 - name: Add Docker GPG key
   ansible.builtin.shell: |
     set -o pipefail
-    curl -fsSL https://download.docker.com/linux/{{ docker_repo_distribution }}/gpg \
+    curl -fsSL {{ docker_repo_base_url }}/{{ docker_repo_distribution }}/gpg \
       | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
   args:

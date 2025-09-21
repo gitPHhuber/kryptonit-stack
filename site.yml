@@ -12,7 +12,8 @@
 
     - name: Wait for dpkg/apt locks to be released
       ansible.builtin.shell: |
-        while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1; do
+        while fuser /var/lib/dpkg/lock-frontend \
+            /var/lib/apt/lists/lock >/dev/null 2>&1; do
           sleep 3
         done
       changed_when: false
