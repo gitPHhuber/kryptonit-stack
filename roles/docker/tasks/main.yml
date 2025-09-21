@@ -8,17 +8,17 @@
 - name: Read current timezone
   ansible.builtin.command:
     cmd: timedatectl show -p Timezone --value
-  register: current_timezone
+  register: docker_current_timezone
   changed_when: false
-  failed_when: current_timezone.rc != 0
+  failed_when: docker_current_timezone.rc != 0
 
 - name: Set timezone  # noqa command-instead-of-module
   ansible.builtin.command:
     cmd: "timedatectl set-timezone {{ timezone }}"
-  when: current_timezone.stdout.strip() != timezone
-  register: timezone_set
-  changed_when: timezone_set.rc == 0
-  failed_when: timezone_set.rc != 0
+  when: docker_current_timezone.stdout.strip() != timezone
+  register: docker_timezone_set
+  changed_when: docker_timezone_set.rc == 0
+  failed_when: docker_timezone_set.rc != 0
 
 - name: Install prerequisites
   ansible.builtin.apt:
@@ -102,7 +102,7 @@
 
 - name: Check if docker-ce is available in APT
   ansible.builtin.command: apt-cache policy docker-ce
-  register: ce_policy
+  register: docker_ce_policy
   changed_when: false
   failed_when: false
   when: ansible_os_family == 'Debian'
@@ -124,7 +124,7 @@
   until: docker_ce_install is succeeded
   when:
     - ansible_os_family == 'Debian'
-    - ce_policy.stdout is search('Candidate:\\s+(?!none)')
+    - docker_ce_policy.stdout is search('Candidate:\\s+(?!none)')
 
 - name: Install Docker from Ubuntu repo (docker.io)
   ansible.builtin.apt:
@@ -138,7 +138,7 @@
   until: docker_io_install is succeeded
   when:
     - ansible_os_family == 'Debian'
-    - ce_policy.stdout is search('Candidate:\\s+none')
+    - docker_ce_policy.stdout is search('Candidate:\\s+none')
 
 - name: Ensure docker service is enabled & started
   ansible.builtin.service:

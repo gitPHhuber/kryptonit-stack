@@ -8,7 +8,7 @@
       ansible.builtin.service:
         name: unattended-upgrades
         state: stopped
-      ignore_errors: true
+      failed_when: false
 
     - name: Wait for dpkg/apt locks to be released
       ansible.builtin.shell: |
@@ -28,6 +28,7 @@
       ansible.builtin.service:
         name: unattended-upgrades
         state: started
-      ignore_errors: true
+      failed_when: false
 
-- import_playbook: playbooks/apps.yml
+- name: Deploy application stack
+  import_playbook: playbooks/apps.yml
