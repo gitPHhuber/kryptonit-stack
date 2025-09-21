@@ -18,7 +18,12 @@
       - lsb-release
     state: present
     update_cache: true
+    force_apt_get: true
   when: ansible_os_family == 'Debian'
+  register: docker_prereq_install
+  retries: 10
+  delay: 6
+  until: docker_prereq_install is succeeded
 
 - name: Resolve Docker channel
   ansible.builtin.set_fact:
@@ -81,7 +86,12 @@
       - docker-compose-plugin
     state: present
     update_cache: true
+    force_apt_get: true
   when: ansible_os_family == 'Debian'
+  register: docker_engine_install
+  retries: 10
+  delay: 6
+  until: docker_engine_install is succeeded
 
 - name: Ensure docker service enabled
   ansible.builtin.systemd:

@@ -1,8 +1,25 @@
 ---
 - name: Ensure Docker on all hosts
   hosts: all
+  become: true
   gather_facts: true
   pre_tasks:
+    - name: Stop unattended-upgrades to avoid apt locks
+      ansible.builtin.service:
+        name: unattended-upgrades
+        state: stopped
+      register: stop_unattended_upgrades
+      failed_when: false
+      when: ansible_os_family == 'Debian'
+
+    - name: Wait for dpkg/apt locks to be released
+      ansible.builtin.shell: |
+        while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1; do
+          sleep 3
+        done
+      changed_when: false
+      when: ansible_os_family == 'Debian'
+
     - name: Check for encrypted secrets file
       ansible.builtin.stat:
         path: "{{ playbook_dir }}/../group_vars/secrets.vault.yml"
@@ -98,6 +115,14 @@
       no_log: true
   roles:
     - docker
+  post_tasks:
+    - name: Start unattended-upgrades
+      ansible.builtin.service:
+        name: unattended-upgrades
+        state: started
+      register: start_unattended_upgrades
+      failed_when: false
+      when: ansible_os_family == 'Debian'
 
 - name: Central TLS reverse proxy (Caddy)
   hosts: proxyhost
