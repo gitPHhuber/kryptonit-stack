@@ -1,6 +1,32 @@
 ---
-- name: Include base configuration
-  import_playbook: playbooks/base.yml
+- name: Ensure Docker on all hosts
+  hosts: all
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Stop unattended-upgrades to avoid apt locks
+      ansible.builtin.service:
+        name: unattended-upgrades
+        state: stopped
+      ignore_errors: true
 
-- name: Include application stack
-  import_playbook: playbooks/apps.yml
+    - name: Wait for dpkg/apt locks to be released
+      ansible.builtin.shell: |
+        while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1; do
+          sleep 3
+        done
+      changed_when: false
+
+  roles:
+    - role: docker
+      tags:
+        - docker
+
+  post_tasks:
+    - name: Start unattended-upgrades
+      ansible.builtin.service:
+        name: unattended-upgrades
+        state: started
+      ignore_errors: true
+
+- import_playbook: playbooks/apps.yml

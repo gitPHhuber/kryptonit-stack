@@ -5,6 +5,10 @@ docker_arch_map:
   armv7l: armhf
   armv6l: armel
 
+docker_repo_distribution_map:
+  Debian: debian
+  Ubuntu: ubuntu
+
 # Shared user-defined Docker network name used by all stacks
 # override in inventory if needed
 docker_infra_network: infra_internal
