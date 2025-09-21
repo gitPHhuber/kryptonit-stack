@@ -1,0 +1,19 @@
+brand_name: "НПК КРИПТОНИТ"
+timezone: "Europe/Moscow"
+
+base_domain: "infra.local"
+auth_fqdn: "auth.infra.local"
+nextcloud_fqdn: "cloud.infra.local"
+onlyoffice_fqdn: "office.infra.local"
+
+letsencrypt_email: "admin@infra.local"
+
+authentik_port: 9000
+nextcloud_port: 8080
+onlyoffice_port: 8081
+
+authentik_upstream: "127.0.0.1:9000"
+nextcloud_upstream: "127.0.0.1:8080"
+onlyoffice_upstream: "127.0.0.1:8081"
+
+trusted_proxies_cidr: "127.0.0.1/32"

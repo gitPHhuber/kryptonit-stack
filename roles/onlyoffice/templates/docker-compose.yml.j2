@@ -1,0 +1,15 @@
+services:
+  documentserver:
+    image: onlyoffice/documentserver:latest
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: "{{ onlyoffice_jwt_secret }}"
+      JWT_HEADER: "Authorization"
+      JWT_IN_BODY: "true"
+    ports:
+      - "127.0.0.1:{{ onlyoffice_port }}:80"
+    volumes:
+      - ./data:/var/www/onlyoffice/Data
+      - ./log:/var/log/onlyoffice
+      - ./lib:/var/lib/onlyoffice
+    restart: unless-stopped

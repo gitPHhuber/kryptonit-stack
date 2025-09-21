@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: "{{ ak_db_user | default('authentik') }}"
+      POSTGRES_PASSWORD: "{{ ak_db_password }}"
+      POSTGRES_DB: "{{ ak_db_name | default('authentik') }}"
+    volumes:
+      - ./postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./redis:/data
+    restart: unless-stopped
+
+  server:
+    image: ghcr.io/goauthentik/server:latest
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__USER: "{{ ak_db_user | default('authentik') }}"
+      AUTHENTIK_POSTGRESQL__NAME: "{{ ak_db_name | default('authentik') }}"
+      AUTHENTIK_POSTGRESQL__PASSWORD: "{{ ak_db_password }}"
+      AUTHENTIK_REDIS__HOST: redis
+      # bootstrap админ:
+      AUTHENTIK_BOOTSTRAP_EMAIL: "{{ ak_bootstrap.email }}"
+      AUTHENTIK_BOOTSTRAP_PASSWORD: "{{ ak_bootstrap.password }}"
+      AUTHENTIK_BOOTSTRAP_TOKEN: "{{ ak_bootstrap.token | default('') }}"
+      # base URL (через Caddy)
+      AUTHENTIK_HOST: "https://{{ auth_fqdn }}"
+    ports:
+      - "127.0.0.1:{{ authentik_port }}:9000"
+    volumes:
+      - ./media:/media
+      - ./config:/config
+    restart: unless-stopped

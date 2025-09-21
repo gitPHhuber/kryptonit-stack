@@ -1,0 +1,46 @@
+# Secrets & env
+*.env
+.env
+.env.* 
+*.vault
+*.age
+
+# Docker / compose volumes & state
+**/pg/
+**/redis/
+**/data/
+**/config/
+**/uploads/
+**/cache/
+**/logs/
+**/storage/
+**/caddy/data/
+**/caddy/config/
+**/caddy/autosave.json
+**/onlyoffice/data/
+
+# Ansible caches
+**/.ansible/
+**/*.retry
+**/.cache/
+
+# Python
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+*.pyc
+.venv/
+venv/
+**/venvs/
+
+# IDE/OS
+**/.idea/
+**/.vscode/
+*.swp
+*.swo
+*.tmp
+.DS_Store
+
+# Local overrides
+**/*.local.*
+**/*.override.*

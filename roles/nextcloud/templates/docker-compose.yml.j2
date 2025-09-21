@@ -1,0 +1,59 @@
+services:
+  db:
+    image: mariadb:10.11
+    command: ["--transaction-isolation=READ-COMMITTED", "--binlog-format=ROW", "--innodb-file-per-table=1", "--innodb_large_prefix=on"]
+    environment:
+      MYSQL_ROOT_PASSWORD: "{{ nc_db_root_password }}"
+      MYSQL_DATABASE: "{{ nc_db_name | default('nextcloud') }}"
+      MYSQL_USER: "{{ nc_db_user | default('nextcloud') }}"
+      MYSQL_PASSWORD: "{{ nc_db_password }}"
+      MARIADB_AUTO_UPGRADE: "1"
+      MARIADB_DISABLE_UPGRADE_BACKUP: "1"
+      CHARACTER_SET_SERVER: "utf8mb4"
+      COLLATION_SERVER: "utf8mb4_general_ci"
+    volumes:
+      - ./db:/var/lib/mysql
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./redis:/data
+    restart: unless-stopped
+
+  app:
+    image: nextcloud:27-apache
+    depends_on:
+      - db
+      - redis
+    environment:
+      MYSQL_DATABASE: "{{ nc_db_name | default('nextcloud') }}"
+      MYSQL_USER: "{{ nc_db_user | default('nextcloud') }}"
+      MYSQL_PASSWORD: "{{ nc_db_password }}"
+      MYSQL_HOST: "db"
+      REDIS_HOST: "redis"
+      PHP_MEMORY_LIMIT: "1024M"
+      PHP_UPLOAD_LIMIT: "4096M"
+      APACHE_DISABLE_REWRITE_IP: "1"
+      OVERWRITEHOST: "{{ nextcloud_fqdn }}"
+      OVERWRITEPROTOCOL: "https"
+      TRUSTED_PROXIES: "{{ trusted_proxies_cidr }}"
+    ports:
+      - "127.0.0.1:{{ nextcloud_port }}:80"
+    volumes:
+      - ./data:/var/www/html
+      - ./apps:/var/www/html/custom_apps
+      - ./config:/var/www/html/config
+    restart: unless-stopped
+
+  cron:
+    image: nextcloud:27-apache
+    entrypoint: /cron.sh
+    depends_on:
+      - app
+    volumes:
+      - ./data:/var/www/html
+      - ./apps:/var/www/html/custom_apps
+      - ./config:/var/www/html/config
+    restart: unless-stopped

@@ -1,0 +1,44 @@
+---
+- name: Create Caddy dirs
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /opt/caddy
+    - /opt/caddy/data
+    - /opt/caddy/config
+
+- name: Render Caddyfile
+  template:
+    src: Caddyfile.j2
+    dest: /opt/caddy/Caddyfile
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Write docker-compose.yml for Caddy
+  copy:
+    dest: /opt/caddy/docker-compose.yml
+    mode: '0644'
+    content: |
+      services:
+        caddy:
+          image: caddy:2
+          ports:
+            - "8080:80"
+            - "8443:443"
+            - "8443:8443/udp"
+          volumes:
+            - ./Caddyfile:/etc/caddy/Caddyfile:ro
+            - ./data:/data
+            - ./config:/config
+          restart: unless-stopped
+
+- name: Run Caddy via compose
+  community.docker.docker_compose_v2:
+    project_src: /opt/caddy
+    state: present
+    pull: missing

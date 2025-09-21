@@ -1,0 +1,19 @@
+---
+- name: Ensure Nextcloud project dir
+  file:
+    path: /opt/nextcloud
+    state: directory
+    mode: '0755'
+
+# roles/nextcloud/templates/docker-compose.yml.j2 должен существовать
+- name: Render Nextcloud docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: /opt/nextcloud/docker-compose.yml
+    mode: '0644'
+
+- name: Run Nextcloud stack (local HTTP {{ nextcloud_port }})
+  community.docker.docker_compose_v2:
+    project_src: /opt/nextcloud
+    state: present
+    pull: missing

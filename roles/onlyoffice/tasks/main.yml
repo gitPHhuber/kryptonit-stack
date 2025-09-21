@@ -1,0 +1,19 @@
+---
+- name: Ensure OnlyOffice project dir
+  file:
+    path: /opt/onlyoffice
+    state: directory
+    mode: '0755'
+
+# roles/onlyoffice/templates/docker-compose.yml.j2 должен существовать
+- name: Render OnlyOffice docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: /opt/onlyoffice/docker-compose.yml
+    mode: '0644'
+
+- name: Run OnlyOffice stack (local HTTP {{ onlyoffice_port }})
+  community.docker.docker_compose_v2:
+    project_src: /opt/onlyoffice
+    state: present
+    pull: missing

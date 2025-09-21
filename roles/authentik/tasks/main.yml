@@ -1,0 +1,20 @@
+---
+- name: Ensure Authentik project dir
+  file:
+    path: /opt/authentik
+    state: directory
+    mode: '0755'
+
+# Предполагаем, что шаблон уже есть в роли:
+# roles/authentik/templates/docker-compose.yml.j2
+- name: Render Authentik docker-compose.yml
+  template:
+    src: docker-compose.yml.j2
+    dest: /opt/authentik/docker-compose.yml
+    mode: '0644'
+
+- name: Run Authentik stack (local HTTP {{ authentik_port }})
+  community.docker.docker_compose_v2:
+    project_src: /opt/authentik
+    state: present
+    pull: missing
