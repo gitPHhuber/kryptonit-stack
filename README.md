@@ -9,71 +9,112 @@
 
 Все сервисы работают в Docker и общаются через общую изолированную сеть. Управление и развёртывание выполняются Ansible и Docker Compose v2.
 
-## Требования
+## Requirements
 
-- Linux-хост с системd, доступный по SSH.
-- Установленный Docker не требуется — роль `docker` сама установит движок и создаст общую сеть.
-- Ansible 2.14+ на рабочей станции.
+Контролирующая машина:
 
-Подтяните коллекции перед запуском:
+- Linux/macOS/WSL с Python **3.10+**.
+- Ansible **2.15+** (проверено с ansible-core 2.16).
+- `ansible-lint`, `yamllint`, `pre-commit` (для локального lint'а, см. ниже).
+
+Управляемые узлы:
+
+- Linux с systemd и доступом по SSH.
+- Возможность выполнять `sudo` без пароля (либо настройте become-метод).
+- Свободные порты 80/443 для Caddy и порты, которые используют сервисы внутри сети Docker.
+- Поддерживается Debian/Ubuntu (роль `docker` устанавливает Docker Engine 24+ и Docker Compose Plugin 2.x).
+
+> **Важно:** модули коллекции [`community.docker`](https://docs.ansible.com/ansible/latest/collections/community/docker/) требуют установленного Docker Engine на целевых хостах и Python-пакета `docker` на контрол-ноде. Роль `docker` ставит движок и Compose, но Python-модуль нужно установить самостоятельно (например, `pip install docker` в виртуальном окружении Ansible).
+
+## Install collections and roles
+
+Сначала установите коллекции и роли, указанные в [`requirements.yml`](requirements.yml):
 
 ```bash
 make deps
+# либо вручную
+ansible-galaxy collection install -r requirements.yml
 ```
 
-## Секреты
-
-Все чувствительные значения хранятся в `group_vars/secrets.vault.yml`. Файл уже зашифрован через Ansible Vault. Структура переменных следующая (пример в открытом виде):
-
-```yaml
-ak_db_password: "supersecret"
-ak_secret_key: "django-secret-key"
-ak_bootstrap:
-  email: "admin@example.com"
-  password: "change-me"
-  token: ""
-authentik_redis_password: "redis-pass"
-
-nc_db_root_password: "rootpass"
-nc_db_password: "nextcloudpass"
-# при необходимости можно переопределить nc_db_user и nc_db_name
-
-onlyoffice_jwt_secret: "jwt-secret"
-```
-
-Отредактируйте файл через `ansible-vault edit group_vars/secrets.vault.yml` или пересоздайте его командой из `Makefile`:
+При использовании `pre-commit` выполните один раз:
 
 ```bash
-make vault
+pipx install pre-commit
+pre-commit install
 ```
 
-## Инвентарь и домены
+## Inventories and variables
 
-По умолчанию все сервисы ставятся на localhost (см. `inventory/hosts.ini`).
-В `group_vars/all.yml` задаются FQDN и имя общей docker-сети (`docker_infra_network`).
-Caddy слушает 80/443 и проксирует к внутренним контейнерам по их именам.
-Для каталогов Nextcloud используется пользователь `www-data`; при необходимости переопределите `nextcloud_fs_owner` и `nextcloud_fs_group` в инвентаре.
+Инвентарь разделён по окружениям:
 
-## Запуск
+- `inventory/dev/hosts.ini` — localhost-сценарий по умолчанию.
+- `inventory/prod/hosts.ini` — пример для реальных хостов, замените FQDN/IP и пользователей.
+
+Запуск по умолчанию использует `inventory/dev/hosts.ini` (см. [`ansible.cfg`](ansible.cfg)). Для переключения окружения передайте путь к инвентарю через переменную `INVENTORY` или флаг `-i`.
+
+Глобальные переменные лежат в [`group_vars/all.yml`](group_vars/all.yml).
+Секреты и чувствительные данные разделены по окружениям и должны храниться в Vault-файлах:
+
+- `group_vars/dev/vault.yml` — пример зашифрованного файла (редактировать через `ansible-vault edit`).
+- `group_vars/prod/vault.yml` — зашифрованный шаблон с заглушками; перезашифруйте с реальными данными перед деплоем (`ansible-vault edit` или `ansible-vault encrypt --output group_vars/prod/vault.yml …`).
+
+Внутри Vault держите пароли БД, JWT, bootstrap-токены и др. значения. Для единичных секретов можно использовать `ansible-vault encrypt_string` прямо в переменных.
+
+## Repository layout
+
+- `playbooks/base.yml` — базовая подготовка хостов (Docker и общая сеть).
+- `playbooks/apps.yml` — прикладные роли (Caddy, Authentik, Nextcloud, OnlyOffice).
+- `roles/*` — роли приведены к стандартному skeleton'у (`tasks/`, `defaults/`, `handlers/`, `templates/`, `files/`, `vars/`, `meta/`).
+- `site.yml` — точка входа, импортирует playbooks по слоям.
+
+## Run
+
+Dev-окружение (localhost):
 
 ```bash
 make run
 ```
 
-Плейбук выполнит следующие шаги:
+Запуск на другом инвентаре:
 
-1. Установит Docker Engine и создаст сеть `infra_internal`.
-2. Развернёт Caddy с подготовленным `Caddyfile` и health-check'ами.
-3. Поднимет Authentik (Postgres, Redis, server, worker).
-4. Поднимет Nextcloud (MariaDB, Redis, web, cron) и подготовит конфиг Redis.
-5. Поднимет OnlyOffice DocumentServer.
+```bash
+make run INVENTORY=inventory/prod/hosts.ini
+# или без Makefile
+ansible-playbook -i inventory/prod/hosts.ini site.yml
+```
 
-После успешного запуска сервисы будут доступны по адресам `https://auth.infra.local`, `https://cloud.infra.local` и `https://office.infra.local` (добавьте записи в DNS/`/etc/hosts`).
+Типичный порядок выполнения:
 
-## Полезные команды
+1. Установить Docker Engine и создать сеть `infra_internal`.
+2. Развернуть Caddy с подготовленным `Caddyfile` и health-check'ами.
+3. Поднять Authentik (Postgres, Redis, server, worker).
+4. Поднять Nextcloud (MariaDB, Redis, web, cron) и сгенерировать конфиг Redis.
+5. Поднять OnlyOffice DocumentServer.
 
-- Обновить контейнеры конкретного сервиса: `ansible-playbook site.yml --tags nextcloud` и т.д.
-- Посмотреть логи Caddy: `docker logs caddy`.
-- Проверить состояние сети: `docker network inspect infra_internal`.
+После успешного запуска сервисы будут доступны по адресам `https://auth.infra.local`, `https://cloud.infra.local` и `https://office.infra.local` (добавьте записи в DNS или `/etc/hosts`).
 
-> **Важно:** убедитесь, что DNS имена указывают на хост, где запущен Caddy, иначе браузер не сможет найти сервисы.
+## Quality checks
+
+Перед пушем прогоняйте линтеры:
+
+```bash
+make lint
+# или через pre-commit
+pre-commit run --all-files
+```
+
+CI-пайплайн [.github/workflows/lint.yml](.github/workflows/lint.yml) автоматически запускает `yamllint` и `ansible-lint` на каждом push/PR.
+
+## Troubleshooting
+
+- **Vault:** убедитесь, что используете правильный пароль/файл vault-id. Для разных окружений удобно держать отдельные файлы паролей.
+- **SSH:** при `Permission denied` проверьте пользователя и ключи в инвентаре (`ansible_user`, `ansible_ssh_private_key_file`).
+- **Become:** если sudo требует пароль, задайте `ansible_become_password` через vault или используйте `--ask-become-pass`.
+- **Python facts:** ошибки вида `MODULE FAILURE` могут означать отсутствие Python 3 на целевом хосте — установите `python3` вручную или используйте `ansible_python_interpreter`.
+- **Docker collection:** при ошибках `Failed to import docker` установите пакет `docker` на контрол-ноде и убедитесь, что Docker daemon доступен на управляемых хостах.
+
+## Дополнительно
+
+- Для обновления контейнеров отдельного сервиса используйте теги, например: `ansible-playbook -i <inventory> playbooks/apps.yml --tags nextcloud`.
+- Шаблоны Jinja в `roles/*/templates/` не должны содержать дефолтных паролей — всё чувствительное храните в Vault.
+- Изучите официальную документацию Ansible: [docs.ansible.com](https://docs.ansible.com/) и коллекции [community.docker](https://docs.ansible.com/ansible/latest/collections/community/docker/index.html).

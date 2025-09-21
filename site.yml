@@ -1,55 +1,6 @@
-- name: Ensure Docker on all hosts
-  hosts: all
-  gather_facts: true
-  vars_files:
-    - group_vars/secrets.vault.yml
-  collections:
-    - community.docker
-    - community.general
-    - ansible.posix
-  roles:
-    - docker
+---
+- name: Include base configuration
+  import_playbook: playbooks/base.yml
 
-- name: Central TLS reverse proxy (Caddy)
-  hosts: proxyhost
-  vars_files:
-    - group_vars/secrets.vault.yml
-  collections:
-    - community.docker
-    - community.general
-    - ansible.posix
-  roles:
-    - caddy_proxy
-
-- name: Authentik SSO
-  hosts: authhost
-  vars_files:
-    - group_vars/secrets.vault.yml
-  collections:
-    - community.docker
-    - community.general
-    - ansible.posix
-  roles:
-    - authentik
-
-- name: Nextcloud
-  hosts: cloudhost
-  vars_files:
-    - group_vars/secrets.vault.yml
-  collections:
-    - community.docker
-    - community.general
-    - ansible.posix
-  roles:
-    - nextcloud
-
-- name: OnlyOffice DocumentServer
-  hosts: officehost
-  vars_files:
-    - group_vars/secrets.vault.yml
-  collections:
-    - community.docker
-    - community.general
-    - ansible.posix
-  roles:
-    - onlyoffice
+- name: Include application stack
+  import_playbook: playbooks/apps.yml

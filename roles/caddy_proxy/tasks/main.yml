@@ -1,32 +1,34 @@
 ---
 - name: Create Caddy dirs
-  file:
+  ansible.builtin.file:
     path: "{{ item }}"
     state: directory
     owner: root
     group: root
     mode: '0755'
   loop:
-    - /opt/caddy
-    - /opt/caddy/data
-    - /opt/caddy/config
+    - "{{ caddy_proxy_project_path }}"
+    - "{{ caddy_proxy_project_path }}/data"
+    - "{{ caddy_proxy_project_path }}/config"
 
 - name: Render Caddyfile
-  template:
+  ansible.builtin.template:
     src: Caddyfile.j2
-    dest: /opt/caddy/Caddyfile
+    dest: "{{ caddy_proxy_project_path }}/Caddyfile"
     owner: root
     group: root
     mode: '0644'
 
 - name: Write docker-compose.yml for Caddy
-  copy:
-    dest: /opt/caddy/docker-compose.yml
+  ansible.builtin.copy:
+    dest: "{{ caddy_proxy_project_path }}/{{ caddy_proxy_compose_file }}"
+    owner: root
+    group: root
     mode: '0644'
     content: |
       services:
         caddy:
-          image: caddy:2
+          image: {{ caddy_proxy_image }}
           container_name: caddy
           ports:
             - "80:80"
@@ -51,6 +53,6 @@
 
 - name: Run Caddy via compose
   community.docker.docker_compose_v2:
-    project_src: /opt/caddy
+    project_src: "{{ caddy_proxy_project_path }}"
     state: present
-    pull: missing
+    pull: "{{ caddy_proxy_compose_pull }}"
