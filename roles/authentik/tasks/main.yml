@@ -1,13 +1,13 @@
 ---
 - name: Ensure Authentik project dir
-  file:
-    path: /opt/authentik
+  ansible.builtin.file:
+    path: "{{ authentik_project_path }}"
     state: directory
     mode: '0755'
 
 - name: Ensure Authentik data directories
-  file:
-    path: "/opt/authentik/{{ item }}"
+  ansible.builtin.file:
+    path: "{{ authentik_project_path }}/{{ item }}"
     state: directory
     mode: '0750'
   loop:
@@ -19,13 +19,13 @@
 # Предполагаем, что шаблон уже есть в роли:
 # roles/authentik/templates/docker-compose.yml.j2
 - name: Render Authentik docker-compose.yml
-  template:
+  ansible.builtin.template:
     src: docker-compose.yml.j2
-    dest: /opt/authentik/docker-compose.yml
+    dest: "{{ authentik_project_path }}/{{ authentik_compose_file }}"
     mode: '0644'
 
 - name: Run Authentik stack
   community.docker.docker_compose_v2:
-    project_src: /opt/authentik
+    project_src: "{{ authentik_project_path }}"
     state: present
-    pull: missing
+    pull: "{{ authentik_compose_pull }}"
