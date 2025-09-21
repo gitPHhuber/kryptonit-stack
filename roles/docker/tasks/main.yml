@@ -92,6 +92,7 @@
 - name: Install Docker CE stack (official repo)
   ansible.builtin.apt:
     update_cache: true
+    force_apt_get: true
     name:
       - docker-ce
       - docker-ce-cli
@@ -103,15 +104,23 @@
     - ansible_os_family == 'Debian'
     - docker_ce_policy.stdout is search('Candidate:\\s+(?!none)')
   register: docker_ce_install
+  retries: 10
+  delay: 6
+  until: docker_ce_install is succeeded
 
 - name: Install Docker from Ubuntu repo (docker.io)
   ansible.builtin.apt:
     update_cache: true
+    force_apt_get: true
     name: docker.io
     state: present
   when:
     - ansible_os_family == 'Debian'
     - docker_ce_policy.stdout is search('Candidate:\\s+none')
+  register: docker_io_install
+  retries: 10
+  delay: 6
+  until: docker_io_install is succeeded
 
 - name: Ensure docker service is enabled & started
   ansible.builtin.service:
@@ -119,7 +128,16 @@
     state: started
     enabled: true
 
-- name: Ensure shared Docker network exists
-  community.docker.docker_network:
-    name: "{{ docker_infra_network }}"
-    state: present
+- name: Check for shared Docker network
+  ansible.builtin.command:
+    cmd: "docker network inspect {{ docker_infra_network }}"
+  register: docker_network_inspect
+  failed_when: false
+  changed_when: false
+
+- name: Create shared Docker network
+  ansible.builtin.command:
+    cmd: "docker network create {{ docker_infra_network }}"
+  when: docker_network_inspect.rc != 0
+  register: docker_network_create
+  changed_when: docker_network_create.rc == 0
