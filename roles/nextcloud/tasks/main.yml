@@ -1,18 +1,40 @@
 ---
 - name: Ensure Nextcloud project dir
-  file:
+  ansible.builtin.file:
     path: /opt/nextcloud
     state: directory
     mode: '0755'
 
+- name: Ensure Nextcloud data directories
+  ansible.builtin.file:
+    path: "/opt/nextcloud/{{ item }}"
+    state: directory
+    owner: "{{ nextcloud_fs_owner }}"
+    group: "{{ nextcloud_fs_group }}"
+    mode: "{{ nextcloud_fs_mode }}"
+  loop:
+    - data
+    - apps
+    - config
+    - db
+    - redis
+
+- name: Render Redis config snippet
+  ansible.builtin.template:
+    src: redis.config.php.j2
+    dest: /opt/nextcloud/config/redis.config.php
+    owner: "{{ nextcloud_fs_owner }}"
+    group: "{{ nextcloud_fs_group }}"
+    mode: '0640'
+
 # roles/nextcloud/templates/docker-compose.yml.j2 должен существовать
 - name: Render Nextcloud docker-compose.yml
-  template:
+  ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: /opt/nextcloud/docker-compose.yml
     mode: '0644'
 
-- name: Run Nextcloud stack (local HTTP {{ nextcloud_port }})
+- name: Run Nextcloud stack
   community.docker.docker_compose_v2:
     project_src: /opt/nextcloud
     state: present

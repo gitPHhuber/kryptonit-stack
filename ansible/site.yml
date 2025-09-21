@@ -1,0 +1,84 @@
+---
+- name: Ensure Docker on all hosts
+  hosts: all
+  gather_facts: true
+  pre_tasks:
+    - name: Check for encrypted secrets file
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../group_vars/secrets.vault.yml"
+      register: stack_secrets_vault
+      delegate_to: localhost
+      when: inventory_hostname == (ansible_play_hosts_all | first)
+
+    - name: Load encrypted secrets when available
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../group_vars/secrets.vault.yml"
+      when: inventory_hostname == (ansible_play_hosts_all | first) and stack_secrets_vault.stat.exists
+      register: stack_secrets_loaded
+      failed_when: false
+      no_log: true
+      delegate_to: localhost
+
+    - name: Build stack secret values
+      ansible.builtin.set_fact:
+        onlyoffice_jwt_secret: "{{ loaded_vars.onlyoffice_jwt_secret | default(lookup('password', secret_lookup.onlyoffice), true) }}"
+        ak_db_password: "{{ loaded_vars.ak_db_password | default(lookup('password', secret_lookup.ak_db), true) }}"
+        ak_secret_key: "{{ loaded_vars.ak_secret_key | default(lookup('password', secret_lookup.ak_secret), true) }}"
+        authentik_redis_password: "{{ loaded_vars.authentik_redis_password | default(lookup('password', secret_lookup.ak_redis), true) }}"
+        nc_db_password: "{{ loaded_vars.nc_db_password | default(lookup('password', secret_lookup.nc_db), true) }}"
+        nc_db_root_password: "{{ loaded_vars.nc_db_root_password | default(lookup('password', secret_lookup.nc_db_root), true) }}"
+        onlyoffice_jwt_header: "{{ loaded_vars.onlyoffice_jwt_header | default('Authorization') }}"
+        ak_bootstrap: "{{ loaded_bootstrap | combine({
+          'email': loaded_bootstrap.email | default('admin@' ~ base_domain),
+          'password': loaded_bootstrap.password | default(lookup('password', secret_lookup.ak_bootstrap), true),
+          'token': loaded_bootstrap.token | default('')
+        }, recursive=True) }}"
+      vars:
+        loaded_vars: "{{ stack_secrets_loaded.ansible_facts | default({}) }}"
+        loaded_bootstrap: "{{ loaded_vars.ak_bootstrap | default({}) }}"
+        secret_lookup:
+          onlyoffice: "{{ '/dev/null length=40 chars=ascii_letters,digits seed=' ~ base_domain ~ '-onlyoffice-jwt' }}"
+          ak_db: "{{ '/dev/null length=24 chars=ascii_letters,digits seed=' ~ base_domain ~ '-authentik-db' }}"
+          ak_secret: "{{ '/dev/null length=48 chars=ascii_letters,digits seed=' ~ base_domain ~ '-authentik-secret' }}"
+          ak_redis: "{{ '/dev/null length=24 chars=ascii_letters,digits seed=' ~ base_domain ~ '-authentik-redis' }}"
+          nc_db: "{{ '/dev/null length=24 chars=ascii_letters,digits seed=' ~ base_domain ~ '-nextcloud-db' }}"
+          nc_db_root: "{{ '/dev/null length=24 chars=ascii_letters,digits seed=' ~ base_domain ~ '-nextcloud-root' }}"
+          ak_bootstrap: "{{ '/dev/null length=20 chars=ascii_letters,digits seed=' ~ base_domain ~ '-authentik-bootstrap' }}"
+      no_log: true
+      delegate_to: localhost
+      delegate_facts: true
+      when: inventory_hostname == (ansible_play_hosts_all | first)
+
+    - name: Distribute stack secrets to every host
+      ansible.builtin.set_fact:
+        onlyoffice_jwt_secret: "{{ hostvars['localhost'].onlyoffice_jwt_secret }}"
+        ak_db_password: "{{ hostvars['localhost'].ak_db_password }}"
+        ak_secret_key: "{{ hostvars['localhost'].ak_secret_key }}"
+        authentik_redis_password: "{{ hostvars['localhost'].authentik_redis_password }}"
+        nc_db_password: "{{ hostvars['localhost'].nc_db_password }}"
+        nc_db_root_password: "{{ hostvars['localhost'].nc_db_root_password }}"
+        onlyoffice_jwt_header: "{{ hostvars['localhost'].onlyoffice_jwt_header }}"
+        ak_bootstrap: "{{ hostvars['localhost'].ak_bootstrap }}"
+      no_log: true
+  roles:
+    - docker
+
+- name: Central TLS reverse proxy (Caddy)
+  hosts: proxyhost
+  roles:
+    - caddy_proxy
+
+- name: Authentik SSO
+  hosts: authhost
+  roles:
+    - authentik
+
+- name: Nextcloud
+  hosts: cloudhost
+  roles:
+    - nextcloud
+
+- name: OnlyOffice DocumentServer
+  hosts: officehost
+  roles:
+    - onlyoffice
