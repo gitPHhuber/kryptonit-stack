@@ -5,6 +5,17 @@
     state: directory
     mode: '0755'
 
+- name: Ensure Authentik data directories
+  file:
+    path: "/opt/authentik/{{ item }}"
+    state: directory
+    mode: '0750'
+  loop:
+    - postgres
+    - redis
+    - media
+    - config
+
 # Предполагаем, что шаблон уже есть в роли:
 # roles/authentik/templates/docker-compose.yml.j2
 - name: Render Authentik docker-compose.yml
@@ -13,7 +24,7 @@
     dest: /opt/authentik/docker-compose.yml
     mode: '0644'
 
-- name: Run Authentik stack (local HTTP {{ authentik_port }})
+- name: Run Authentik stack
   community.docker.docker_compose_v2:
     project_src: /opt/authentik
     state: present

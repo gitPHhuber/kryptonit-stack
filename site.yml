@@ -1,9 +1,3 @@
-- name: Bootstrap local caches (registry mirror + apt-cacher-ng)
-  hosts: all
-  gather_facts: false
-  roles:
-    - cache
-
 - name: Ensure Docker on all hosts
   hosts: all
   gather_facts: true
