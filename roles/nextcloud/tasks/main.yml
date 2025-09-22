@@ -1,59 +1,152 @@
 ---
-- name: Ensure Nextcloud project dir
+- name: Ensure Nextcloud directories exist
   ansible.builtin.file:
-    path: "{{ nextcloud_project_path }}"
+    path: "{{ item }}"
     state: directory
     mode: '0755'
-
-- name: Ensure Nextcloud data directories
-  ansible.builtin.file:
-    path: "{{ nextcloud_project_path }}/{{ item }}"
-    state: directory
-    owner: "{{ nextcloud_fs_owner }}"
-    group: "{{ nextcloud_fs_group }}"
-    mode: "{{ nextcloud_fs_mode }}"
   loop:
-    - data
-    - apps
-    - config
-    - db
-    - redis
+    - "{{ nextcloud_project_path }}"
+    - "{{ nextcloud_data_path }}"
+    - "{{ nextcloud_db_path }}"
+    - "{{ nextcloud_redis_path }}"
 
-- name: Render Redis config snippet
-  ansible.builtin.template:
-    src: redis.config.php.j2
-    dest: "{{ nextcloud_project_path }}/config/redis.config.php"
-    owner: "{{ nextcloud_fs_owner }}"
-    group: "{{ nextcloud_fs_group }}"
-    mode: '0640'
-  notify: Apply Nextcloud stack
+- name: Deploy Nextcloud stack
+  community.docker.docker_compose_v2:
+    project_name: nextcloud
+    definition:
+      version: '3.9'
+      services:
+        nextcloud-mariadb:
+          image: "{{ nextcloud_mariadb_image }}"
+          container_name: nextcloud-mariadb
+          restart: unless-stopped
+          environment:
+            MYSQL_ROOT_PASSWORD: >-
+              {{ nextcloud_db_root_password | mandatory }}
+            MYSQL_DATABASE: "{{ nextcloud_db_name }}"
+            MYSQL_USER: "{{ nextcloud_db_user }}"
+            MYSQL_PASSWORD: >-
+              {{ nextcloud_db_password | mandatory }}
+          volumes:
+            - >-
+              {{ nextcloud_db_path }}:/var/lib/mysql
+          healthcheck:
+            test:
+              - CMD-SHELL
+              - >-
+                mysqladmin ping -h localhost
+                -p{{ nextcloud_db_root_password | mandatory }} || exit 1
+            interval: 30s
+            timeout: 10s
+            retries: 5
+          networks:
+            - "{{ infra_network_name }}"
 
-# roles/nextcloud/templates/docker-compose.yml.j2 должен существовать
-- name: Render Nextcloud docker-compose.yml
-  ansible.builtin.template:
-    src: docker-compose.yml.j2
-    dest: "{{ nextcloud_project_path }}/{{ nextcloud_compose_file }}"
-    mode: '0644'
-  notify: Apply Nextcloud stack
+        nextcloud-redis:
+          image: "{{ nextcloud_redis_image }}"
+          container_name: nextcloud-redis
+          restart: unless-stopped
+          command:
+            - redis-server
+            - --requirepass
+            - "{{ nextcloud_redis_password | mandatory }}"
+          volumes:
+            - >-
+              {{ nextcloud_redis_path }}:/data
+          healthcheck:
+            test:
+              - CMD-SHELL
+              - >-
+                redis-cli -a {{ nextcloud_redis_password | mandatory }}
+                ping | grep PONG
+            interval: 30s
+            timeout: 10s
+            retries: 5
+          networks:
+            - "{{ infra_network_name }}"
 
-- name: Ensure Nextcloud stack is running  # noqa command-instead-of-module
-  ansible.builtin.command:
-    cmd: >-
-      docker compose -f {{ nextcloud_compose_file }}
-      up -d --remove-orphans
-      {% if nextcloud_compose_pull in ['missing', 'always'] %}
-      --pull {{ nextcloud_compose_pull }}
-      {% endif %}
-  args:
-    chdir: "{{ nextcloud_project_path }}"
-  register: nextcloud_compose
-  failed_when: nextcloud_compose.rc != 0
-  changed_when: >-
-    nextcloud_compose.rc == 0 and (
-      nextcloud_compose.stdout is search(
-        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
-      )
-      or nextcloud_compose.stderr is search(
-        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
-      )
-    )
+        nextcloud-web:
+          image: "{{ nextcloud_image }}"
+          container_name: nextcloud-web
+          restart: unless-stopped
+          environment:
+            MYSQL_HOST: nextcloud-mariadb
+            MYSQL_DATABASE: "{{ nextcloud_db_name }}"
+            MYSQL_USER: "{{ nextcloud_db_user }}"
+            MYSQL_PASSWORD: >-
+              {{ nextcloud_db_password | mandatory }}
+            MYSQL_ROOT_PASSWORD: >-
+              {{ nextcloud_db_root_password | mandatory }}
+            NEXTCLOUD_TRUSTED_DOMAINS: >-
+              {{ nextcloud_trusted_domains | join(' ') }}
+            NEXTCLOUD_ADMIN_USER: >-
+              {{ nextcloud_admin_user | default('admin') }}
+            NEXTCLOUD_ADMIN_PASSWORD: >-
+              {{ nextcloud_admin_password | default('AdminPass123!') }}
+            NEXTCLOUD_DATA_DIR: /var/www/html/data
+            REDIS_HOST: nextcloud-redis
+            REDIS_HOST_PASSWORD: >-
+              {{ nextcloud_redis_password | mandatory }}
+            APACHE_DISABLE_REWRITE_IP: "1"
+            PHP_MEMORY_LIMIT: >-
+              {{ nextcloud_php_memory_limit }}
+            TZ: "{{ nextcloud_timezone }}"
+          volumes:
+            - >-
+              {{ nextcloud_data_path }}:/var/www/html
+          expose:
+            - "80"
+          depends_on:
+            nextcloud-mariadb:
+              condition: service_healthy
+            nextcloud-redis:
+              condition: service_healthy
+          healthcheck:
+            test:
+              - CMD-SHELL
+              - pidof apache2
+            interval: 60s
+            timeout: 10s
+            retries: 5
+          networks:
+            - "{{ infra_network_name }}"
+
+        nextcloud-cron:
+          image: "{{ nextcloud_cron_image }}"
+          container_name: nextcloud-cron
+          restart: unless-stopped
+          entrypoint: ["/cron.sh"]
+          environment:
+            MYSQL_HOST: nextcloud-mariadb
+            MYSQL_DATABASE: "{{ nextcloud_db_name }}"
+            MYSQL_USER: "{{ nextcloud_db_user }}"
+            MYSQL_PASSWORD: >-
+              {{ nextcloud_db_password | mandatory }}
+            MYSQL_ROOT_PASSWORD: >-
+              {{ nextcloud_db_root_password | mandatory }}
+            NEXTCLOUD_DATA_DIR: /var/www/html/data
+            REDIS_HOST: nextcloud-redis
+            REDIS_HOST_PASSWORD: >-
+              {{ nextcloud_redis_password | mandatory }}
+            TZ: "{{ nextcloud_timezone }}"
+          volumes:
+            - >-
+              {{ nextcloud_data_path }}:/var/www/html
+          depends_on:
+            nextcloud-mariadb:
+              condition: service_healthy
+            nextcloud-redis:
+              condition: service_healthy
+          networks:
+            - "{{ infra_network_name }}"
+          healthcheck:
+            test:
+              - CMD-SHELL
+              - >-
+                php -r 'exit(0);'
+            interval: 60s
+            timeout: 10s
+            retries: 5
+      networks:
+        "{{ infra_network_name }}":
+          external: true

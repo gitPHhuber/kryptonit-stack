@@ -1,48 +1,152 @@
 ---
-- name: Ensure Authentik project dir
+- name: Ensure Authentik directories exist
   ansible.builtin.file:
-    path: "{{ authentik_project_path }}"
+    path: "{{ item }}"
     state: directory
     mode: '0755'
-
-- name: Ensure Authentik data directories
-  ansible.builtin.file:
-    path: "{{ authentik_project_path }}/{{ item }}"
-    state: directory
-    mode: '0750'
   loop:
-    - postgres
-    - redis
-    - media
-    - config
+    - "{{ authentik_project_path }}"
+    - "{{ authentik_pg_data }}"
+    - "{{ authentik_redis_data }}"
+    - "{{ authentik_media }}"
+    - "{{ authentik_templates }}"
+    - "{{ authentik_geoip }}"
 
-# Предполагаем, что шаблон уже есть в роли:
-# roles/authentik/templates/docker-compose.yml.j2
-- name: Render Authentik docker-compose.yml
-  ansible.builtin.template:
-    src: docker-compose.yml.j2
-    dest: "{{ authentik_project_path }}/{{ authentik_compose_file }}"
-    mode: '0644'
-  notify: Apply Authentik stack
+- name: Deploy Authentik stack
+  community.docker.docker_compose_v2:
+    project_name: authentik
+    definition:
+      version: '3.9'
+      services:
+        authentik-postgres:
+          image: "{{ authentik_postgres_image }}"
+          container_name: authentik-postgres
+          restart: unless-stopped
+          environment:
+            POSTGRES_DB: "{{ authentik_db_name }}"
+            POSTGRES_USER: "{{ authentik_db_user }}"
+            POSTGRES_PASSWORD: "{{ authentik_db_password | mandatory }}"
+          volumes:
+            - "{{ authentik_pg_data }}:/var/lib/postgresql/data"
+          healthcheck:
+            test:
+              - CMD-SHELL
+              - >-
+                pg_isready -U {{ authentik_db_user }}
+            interval: 30s
+            timeout: 10s
+            retries: 5
+          networks:
+            - "{{ infra_network_name }}"
 
-- name: Ensure Authentik stack is running  # noqa command-instead-of-module
-  ansible.builtin.command:
-    cmd: >-
-      docker compose -f {{ authentik_compose_file }}
-      up -d --remove-orphans
-      {% if authentik_compose_pull in ['missing', 'always'] %}
-      --pull {{ authentik_compose_pull }}
-      {% endif %}
-  args:
-    chdir: "{{ authentik_project_path }}"
-  register: authentik_compose
-  failed_when: authentik_compose.rc != 0
-  changed_when: >-
-    authentik_compose.rc == 0 and (
-      authentik_compose.stdout is search(
-        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
-      )
-      or authentik_compose.stderr is search(
-        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
-      )
-    )
+        authentik-redis:
+          image: "{{ authentik_redis_image }}"
+          container_name: authentik-redis
+          restart: unless-stopped
+          command:
+            - redis-server
+            - --requirepass
+            - "{{ authentik_redis_password | mandatory }}"
+          volumes:
+            - "{{ authentik_redis_data }}:/data"
+          healthcheck:
+            test:
+              - CMD-SHELL
+              - >-
+                redis-cli -a {{ authentik_redis_password | mandatory }}
+                ping | grep PONG
+            interval: 30s
+            timeout: 10s
+            retries: 5
+          networks:
+            - "{{ infra_network_name }}"
+
+        authentik-server:
+          image: "{{ authentik_images.server }}"
+          container_name: authentik-server
+          restart: unless-stopped
+          command: ["server"]
+          environment:
+            AUTHENTIK_SECRET_KEY: >-
+              {{ authentik_secret_key | mandatory }}
+            AUTHENTIK_BOOTSTRAP_EMAIL: >-
+              {{ authentik_bootstrap_email | default('admin@' + base_domain) }}
+            AUTHENTIK_BOOTSTRAP_PASSWORD: >-
+              {{ authentik_bootstrap_password | default('ChangeMe!123') }}
+            AUTHENTIK_BOOTSTRAP_TOKEN: >-
+              {{ authentik_bootstrap_token | default('') }}
+            AUTHENTIK_REDIS__HOST: authentik-redis
+            AUTHENTIK_REDIS__PASSWORD: >-
+              {{ authentik_redis_password | mandatory }}
+            AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
+            AUTHENTIK_POSTGRESQL__PORT: "5432"
+            AUTHENTIK_POSTGRESQL__NAME: "{{ authentik_db_name }}"
+            AUTHENTIK_POSTGRESQL__USER: "{{ authentik_db_user }}"
+            AUTHENTIK_POSTGRESQL__PASSWORD: >-
+              {{ authentik_db_password | mandatory }}
+            AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+            AUTHENTIK_LOG_LEVEL: info
+          volumes:
+            - "{{ authentik_media }}:/media"
+            - "{{ authentik_templates }}:/templates"
+            - "{{ authentik_geoip }}:/geoip"
+          expose:
+            - "9000"
+          depends_on:
+            authentik-postgres:
+              condition: service_healthy
+            authentik-redis:
+              condition: service_healthy
+          healthcheck:
+            test:
+              - CMD-SHELL
+              - >-
+                python -c "import urllib.request; urllib.request.urlopen(
+                'http://127.0.0.1:9000/-/health/ready')"
+            interval: 30s
+            timeout: 10s
+            retries: 10
+          networks:
+            - "{{ infra_network_name }}"
+
+        authentik-worker:
+          image: "{{ authentik_images.worker }}"
+          container_name: authentik-worker
+          restart: unless-stopped
+          command: ["worker"]
+          environment:
+            AUTHENTIK_SECRET_KEY: >-
+              {{ authentik_secret_key | mandatory }}
+            AUTHENTIK_REDIS__HOST: authentik-redis
+            AUTHENTIK_REDIS__PASSWORD: >-
+              {{ authentik_redis_password | mandatory }}
+            AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
+            AUTHENTIK_POSTGRESQL__PORT: "5432"
+            AUTHENTIK_POSTGRESQL__NAME: "{{ authentik_db_name }}"
+            AUTHENTIK_POSTGRESQL__USER: "{{ authentik_db_user }}"
+            AUTHENTIK_POSTGRESQL__PASSWORD: >-
+              {{ authentik_db_password | mandatory }}
+            AUTHENTIK_LOG_LEVEL: info
+          volumes:
+            - "{{ authentik_media }}:/media"
+            - "{{ authentik_templates }}:/templates"
+            - "{{ authentik_geoip }}:/geoip"
+          depends_on:
+            authentik-postgres:
+              condition: service_healthy
+            authentik-redis:
+              condition: service_healthy
+          networks:
+            - "{{ infra_network_name }}"
+          healthcheck:
+            test:
+              - CMD-SHELL
+              - >-
+                python -c "import urllib.request; urllib.request.urlopen(
+                'http://authentik-server:9000/-/health/ready')"
+            interval: 60s
+            timeout: 10s
+            retries: 10
+      networks:
+        "{{ infra_network_name }}":
+          external: true

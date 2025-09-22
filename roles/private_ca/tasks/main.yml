@@ -1,131 +1,103 @@
 ---
-- name: Ensure private CA password is defined
-  ansible.builtin.assert:
-    that:
-      - private_ca_password is string
-      - private_ca_password != 'CHANGEME'
-      - private_ca_password | length >= 12
-    fail_msg: |
-      Define a strong private_ca_password (>=12 characters)
-      via inventory or Vault before provisioning the internal
-      certificate authority.
+- name: Build consolidated DNS list
+  ansible.builtin.set_fact:
+    private_ca_all_dns: >-
+      {{ (private_ca_dns_names + private_ca_extra_dns) | unique }}
 
-- name: Ensure directories for private CA exist
+- name: Ensure project directories exist
   ansible.builtin.file:
-    path: "{{ item.path }}"
+    path: "{{ private_ca_project_path }}/{{ item }}"
     state: directory
-    owner: "{{ item.owner }}"
-    group: "{{ item.group }}"
-    mode: "{{ item.mode }}"
-  loop:
-    - path: "{{ private_ca_project_path }}"
-      owner: root
-      group: root
-      mode: '0755'
-    - path: "{{ private_ca_project_path }}/config"
-      owner: '1000'
-      group: '1000'
-      mode: '0750'
-    - path: "{{ private_ca_project_path }}/config/secrets"
-      owner: '1000'
-      group: '1000'
-      mode: '0750'
+    mode: '0750'
+  loop: "{{ private_ca_data_subdirs }}"
 
-- name: Write private CA password secret
+- name: Write private CA password file
   ansible.builtin.copy:
-    dest: "{{ private_ca_project_path }}/config/secrets/password"
-    content: "{{ private_ca_password }}\n"
-    owner: '1000'
-    group: '1000'
+    dest: "{{ private_ca_password_file }}"
+    content: "{{ private_ca_password | mandatory }}\n"
     mode: '0600'
-  no_log: true
 
-- name: Check existing private CA configuration
-  ansible.builtin.stat:
-    path: "{{ private_ca_config_path }}"
-  register: private_ca_config
-
-- name: Initialize private CA configuration  # noqa command-instead-of-module
-  ansible.builtin.command:
-    argv:
-      - docker
-      - run
-      - "--rm"
-      - "--name"
-      - private-ca-init
-      - "-e"
-      - "STEP_CA_PASSWORD={{ private_ca_password }}"
-      - "-v"
-      - "{{ private_ca_project_path }}/config:/home/step"
-      - "{{ private_ca_image }}"
-      - step
-      - ca
-      - init
-      - "--deployment-type"
-      - standalone
-      - "--name"
-      - "{{ private_ca_name }}"
-      - "--address"
-      - ":{{ private_ca_listen_port }}"
-      - "--dns"
-      - "{{ private_ca_hostname }}"
-      - "--acme"
-      - "--provisioner"
-      - admin
-      - "--password-file"
-      - /home/step/secrets/password
-  when: not private_ca_config.stat.exists
-  register: private_ca_init
-  failed_when: private_ca_init.rc != 0
-  changed_when: private_ca_init.rc == 0
-
-- name: Render docker-compose.yml for private CA
-  ansible.builtin.template:
-    src: docker-compose.yml.j2
-    dest: "{{ private_ca_project_path }}/{{ private_ca_compose_file }}"
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Apply private CA stack
-
-- name: Ensure private CA stack is running  # noqa command-instead-of-module
-  ansible.builtin.command:
-    cmd: >-
-      docker compose -f {{ private_ca_compose_file }}
-      up -d --remove-orphans
-      {% if private_ca_compose_pull in ['missing', 'always'] %}
-      --pull {{ private_ca_compose_pull }}
-      {% endif %}
+- name: Initialize step-ca configuration if missing
+  ansible.builtin.command: >-
+    docker run --rm \
+      -v {{ private_ca_project_path }}/config:/home/step/config \
+      -v {{ private_ca_project_path }}/secrets:/home/step/secrets \
+      -v {{ private_ca_project_path }}/db:/home/step/db \
+      -e STEP_CA_PASSWORD={{ private_ca_password | mandatory }} \
+      {{ private_ca_image }} \
+      step ca init --deployment-type standalone \
+        --name "{{ private_ca_name }}" \
+        --dns "{{ private_ca_hostname }}" \
+        --address ":{{ private_ca_port }}" \
+        --provisioner "{{ private_ca_provisioner }}" \
+        --password-file /home/step/secrets/password.txt \
+        --acme
   args:
-    chdir: "{{ private_ca_project_path }}"
-  register: private_ca_up
-  failed_when: private_ca_up.rc != 0
-  changed_when: >-
-    private_ca_up.rc == 0 and (
-      private_ca_up.stdout is search(
-        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
-      )
-      or private_ca_up.stderr is search(
-        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
-      )
-    )
+    creates: "{{ private_ca_config_path }}"
+
+- name: Deploy step-ca configuration template
+  ansible.builtin.template:
+    src: step-ca-config.json.j2
+    dest: "{{ private_ca_config_path }}"
+    mode: '0644'
+
+- name: Deploy private CA service
+  community.docker.docker_compose_v2:
+    project_name: private_ca
+    definition:
+      version: '3.9'
+      services:
+        "{{ private_ca_service_name }}":
+          image: "{{ private_ca_image }}"
+          container_name: "{{ private_ca_service_name }}"
+          restart: unless-stopped
+          environment:
+            STEP_CA_PASSWORD: >-
+              {{ private_ca_password | mandatory }}
+          volumes:
+            - >-
+              {{ private_ca_project_path }}/config:/home/step/config
+            - >-
+              {{ private_ca_project_path }}/secrets:/home/step/secrets
+            - >-
+              {{ private_ca_project_path }}/db:/home/step/db
+          ports:
+            - "{{ private_ca_port }}:{{ private_ca_port }}"
+          healthcheck:
+            test:
+              - CMD-SHELL
+              - step --help >/dev/null 2>&1
+            interval: 30s
+            timeout: 10s
+            retries: 5
+          networks:
+            - "{{ infra_network_name }}"
+      networks:
+        "{{ infra_network_name }}":
+          external: true
 
 - name: Wait for root certificate to appear
   ansible.builtin.wait_for:
     path: "{{ private_ca_root_cert_path }}"
     timeout: 120
 
-- name: Ensure local directory for root certificate exists
+- name: Read root certificate content
+  ansible.builtin.slurp:
+    src: "{{ private_ca_root_cert_path }}"
+  register: private_ca_root_ca
+
+- name: Ensure branding directory exists on control host
   ansible.builtin.file:
-    path: "{{ private_ca_local_root_cert | dirname }}"
+    path: "{{ private_ca_branding_cert | dirname }}"
     state: directory
     mode: '0755'
   delegate_to: localhost
   run_once: true
 
-- name: Fetch root certificate to control node
-  ansible.builtin.fetch:
-    src: "{{ private_ca_root_cert_path }}"
-    dest: "{{ private_ca_local_root_cert }}"
-    flat: true
+- name: Copy root certificate to branding assets
+  ansible.builtin.copy:
+    dest: "{{ private_ca_branding_cert }}"
+    content: "{{ private_ca_root_ca.content | b64decode }}"
+    mode: '0644'
+  delegate_to: localhost
   run_once: true

@@ -1,166 +1,115 @@
 # kryptonit-stack
 
-Инфраструктурный плейбук Ansible, который "одной кнопкой" поднимает приватный стек для файлового обмена и совместной работы:
+Инфраструктурный репозиторий для автоматического развёртывания приватного стека сервисов (private-ca, Caddy, Authentik, Nextcloud, OnlyOffice) с помощью Ansible и Docker Compose v2.
 
-- **private-ca (step-ca)** — внутренний центр сертификации (ACME) для выпуска доверенных сертификатов.
-- **Caddy** — единая внешняя точка входа с TLS и безопасными заголовками, автоматически запрашивает сертификаты у частного ЦС.
-- **Authentik** — центр аутентификации (OIDC/SAML) и единый вход.
-- **Nextcloud** — файловое хранилище с шарингом и WebDAV.
-- **OnlyOffice DocumentServer** — онлайн-редактор документов из Nextcloud.
+## Состав стека
 
-Все сервисы работают в Docker и общаются через общую изолированную сеть. Управление и развёртывание выполняются Ansible и Docker Compose v2.
+| Сервис | Назначение | Особенности |
+| --- | --- | --- |
+| **smallstep/step-ca** | Внутренний центр сертификации с ACME-эндпоинтом `https://private-ca:9000/acme/acme/directory`. | Генерирует корневой сертификат, хранит его на хосте и выгружает в `branding/assets/root_ca.crt`. |
+| **Caddy** | Единая точка входа, выдаёт TLS-сертификаты через private-ca. | Работает в сети `infra_internal`, может отключать автоматический HTTPS (dev). |
+| **Authentik** | IdP и единый вход. | Контейнеры server/worker + PostgreSQL и Redis. |
+| **Nextcloud** | Файловое хранилище. | Контейнеры web/cron + MariaDB и Redis. |
+| **OnlyOffice DocumentServer** | Совместное редактирование документов из Nextcloud. | JWT секрет для интеграции хранится в Vault. |
 
-## Requirements
+Все контейнеры подключены к общей docker-сети `infra_internal` и настроены с `restart: unless-stopped`.
 
+## Требования
 
 ### Контролирующая машина
 
-- Linux/macOS/WSL с Python **3.10+**.
-- Ansible **2.15+** (проверено с ansible-core 2.16).
-- Установленные `ansible-lint`, `yamllint`, `pre-commit` (для локального lint'а, см. ниже).
-- Python-библиотека [`docker`](https://pypi.org/project/docker/) (клиент для коллекции `community.docker`). Рекомендуется установить в виртуальное окружение: `python3 -m venv .venv && source .venv/bin/activate`, затем `pip install --upgrade pip docker`.
+- Python 3.10+ и Ansible 2.15+ (проверено с ansible-core 2.16).
+- Установленные `ansible-lint`, `yamllint`, `docker` (Python-библиотека) для коллекции `community.docker`.
+- Доступ в интернет для загрузки Docker образов.
 
-### Управляемые узлы
+### Управляемый хост
 
-- Linux с systemd. Для локального сценария достаточно одной машины с Docker.
-- Доступ root (через `sudo` без пароля или заранее настроенный `become`-метод).
-- Свободные порты 80/443/9000 и ресурсы для контейнеров (CPU/RAM/диск).
-- Docker Engine 24+ и Docker Compose Plugin 2.x (роль `docker` устанавливает при необходимости).
+- Ubuntu/Debian с systemd.
+- root-доступ (passwordless sudo или `--ask-become-pass`).
+- Порты 80, 443 и 9000 свободны.
+- Docker Engine 24+ и Docker Compose Plugin v2 (устанавливаются ролью `docker`).
 
-> **Важно:** роли управляют контейнерами через CLI `docker compose`. Убедитесь, что установлен [Docker Compose Plugin v2](https://docs.docker.com/compose/install/linux/) и бинарь `docker` доступен в `PATH`.
+## Инсталляция / Ограничения сети
 
-Порт `9000` используется контейнером private-ca. Откройте его только для доверенной внутренней сети — весь TLS-трафик пользователей по-прежнему идёт через 443 порт Caddy.
+- **Force IPv4 для APT.** Роль `base` автоматически пишет `/etc/apt/apt.conf.d/99force-ipv4` с `Acquire::ForceIPv4 "true";`, чтобы избежать долгих таймаутов IPv6.
+- **Fallback после неудачных `apt update`.** При ошибках Ansible выполняет `apt-get clean && rm -rf /var/lib/apt/lists/*` и повторяет `apt-get update -o Acquire::Retries=5`.
+- **Установка Docker в оффлайн-/degraded-сетях.**
+  - Переменная `use_official_docker_repo` (по умолчанию `true`) выбирает, использовать ли `download.docker.com`. При недоступности зеркала роль автоматически откатывается на пакет `docker.io` из стандартного репозитория.
+  - Все URL репозиториев вынесены в `group_vars/all.yml` (`docker_official_repo_base`, `docker_repo_key_url`, `docker_repo_url`) и могут быть переназначены на локальные зеркала.
+  - Если пакеты `docker-compose-plugin`/`docker-compose-v2` недоступны, роль ставит `docker-compose` (v1) и разворачивает shim в `/usr/lib/docker/cli-plugins/docker-compose`, перенаправляющий `docker compose` на бинарник v1.
+  - При наличии установленного Docker роль можно пропустить флагом `--skip-tags docker`.
+- **Предзагрузка образов.** Список образов и их версий хранится в `docker_image_cache` (`group_vars/all.yml`). Разместите заранее выгруженные тарболы в каталоге `images/` — роль загрузит их через `docker load` после копирования на хост.
+- **Fail-fast с подсказками.** При сетевых ошибках задачи выводят рекомендации: переключиться на `docker.io`, проверить ForceIPv4 или использовать оффлайн-образы (`make images-cache`).
 
-## Install collections and roles
+## RF-friendly install
 
-Все команды ниже выполняйте из корня репозитория:
+Короткий чек-лист для развёртывания в ограниченных сетях:
 
-```bash
-make deps
-# команда оставлена для совместимости и просто подтвердит,
-# что внешние коллекции не требуются
-ansible-galaxy collection install -r requirements.yml
-```
+1. Убедитесь, что ForceIPv4 включён (файл `/etc/apt/apt.conf.d/99force-ipv4` создаётся ролью `base`).
+2. При необходимости установите Docker заранее (`docker.io`, `docker-compose-v2`) и запускайте `ansible-playbook ... --skip-tags docker`.
+3. Переопределите `use_official_docker_repo=false` и/или `docker_official_repo_base` для внутренних зеркал.
+4. (Опционально) На машине с доступом к интернету выполните `make images-cache`, перенесите каталог `images/` и убедитесь, что tar-архивы подхватываются автоматически.
 
-Все роли используют только модули из `ansible.builtin`. Файл `requirements.yml`
-оставлен пустым, чтобы `ansible-galaxy` мог отработать без доступа в интернет.
+## Быстрый старт
 
-При использовании `pre-commit` выполните один раз:
+1. Склонируйте репозиторий и установите зависимости коллекций:
+   ```bash
+   make deps
+   ```
+2. Настройте секреты в `group_vars/dev/vault.yml` (для локальной проверки уже есть заглушки; в production зашифруйте файл `ansible-vault` и обновите значения в `group_vars/prod/vault.yml`).
+3. (Локально) Добавьте записи в `/etc/hosts`:
+   ```text
+   127.0.0.1 auth.infra.local cloud.infra.local office.infra.local private-ca
+   ```
+4. Запустите развёртывание:
+   ```bash
+   make run
+   ```
+   По умолчанию используется `inventory/local.ini`. Для другого окружения задайте переменную `INVENTORY`, например `make run INVENTORY=inventory/prod/hosts.ini`.
 
-```bash
-pipx install pre-commit
-pre-commit install
-```
+После успешного выполнения будут доступны:
+- https://auth.infra.local — Authentik
+- https://cloud.infra.local — Nextcloud
+- https://office.infra.local — OnlyOffice (через Caddy)
 
-## Inventories and variables
+Корневой сертификат внутреннего ЦС сохраняется на хосте (`/opt/private-ca/config/certs/root_ca.crt`) и автоматически копируется на управляющую машину в `branding/assets/root_ca.crt`. Раздайте этот файл пользователям и установите в доверенные корневые сертификаты ОС/браузеров.
 
-- `inventory/local.ini` — одиночная машина (`ansible_connection=local`). Это значение используется по умолчанию (см. [`ansible.cfg`](ansible.cfg)).
-- `inventory/prod/hosts.ini` — пример для удалённых хостов. Замените FQDN/IP и пользователей под свою инфраструктуру.
+## Структура плейбуков
 
-Переключить инвентарь можно переменной `INVENTORY` (`make run INVENTORY=inventory/prod/hosts.ini`) или флагом `-i` Ansible.
+- `site.yml` — точка входа; импортирует `playbooks/base.yml` и `playbooks/apps.yml`.
+- `playbooks/base.yml` — подготовка хоста: снятие apt-lock, установка Docker Engine + compose-plugin (роль `docker`), создание сети `infra_internal` (роль `network`).
+- `playbooks/apps.yml` — последовательный деплой сервисов: `private_ca` → `caddy` → `authentik` → `nextcloud` → `onlyoffice`.
 
-Глобальные переменные заданы в [`group_vars/all.yml`](group_vars/all.yml).
-Ключевые параметры для приватного ЦС и прокси:
+## Переменные и секреты
 
-- `private_ca_hostname` — доменное имя центра сертификации (используется при инициализации step-ca).
-- `internal_ca_url` — ACME-директория, к которой обращается Caddy.
-- `private_ca_root_cert_path` — путь к корневому сертификату на прокси-хосте.
+- Общие параметры (домены, URL ACME, имена контейнеров) — в `group_vars/all.yml`.
+- Секреты (пароли БД, Redis, JWT, ключи Authentik) — только в Vault-файлах `group_vars/<env>/vault.yml`.
+  - `group_vars/dev/vault.yml` содержит примерные значения для локального запуска и отключает автоматический HTTPS в Caddy.
+  - `group_vars/prod/vault.yml` — шаблон; перед использованием зашифруйте `ansible-vault` и замените значения.
 
-Для локальной разработки подготовлены несекретные значения по умолчанию:
+## Makefile
 
-- [`group_vars/dev/vars.yml`](group_vars/dev/vars.yml) содержит заглушки для паролей Authentik/Nextcloud/OnlyOffice и `private_ca_password`,
-  а также отключает автоматический HTTPS в Caddy (`caddy_proxy_auto_https: false`).
-- [`group_vars/dev/vault.yml`](group_vars/dev/vault.yml) — пример зашифрованного файла для тех случаев, когда хочется использовать Vault и на dev.
+- `make deps` — установка необходимых коллекций (`community.docker`, `ansible.posix`, `community.general`).
+- `make run` — запуск `ansible-playbook` с выбранным инвентарём (по умолчанию `inventory/local.ini`).
+- `make lint` — локальный запуск `yamllint` и `ansible-lint`.
+- `make images-cache` — выгрузка Docker-образов из `docker_image_cache` в каталог `images/` (требуется Docker на контролирующей машине).
 
-Секреты вынесены по окружениям и должны храниться в Vault-файлах:
+## Примечания по эксплуатации
 
-- `group_vars/dev/vault.yml` — пример зашифрованного файла для локального сценария.
-- `group_vars/prod/vault.yml` — зашифрованный шаблон с заглушками.
+- Роль `private_ca` инициализирует step-ca только при первом запуске; последующие прогоны idempotent.
+- `caddy` ожидает доступности ACME-эндпоинта перед стартом (если включён автоматический HTTPS).
+- Все роли используют `community.docker.docker_compose_v2` и внешнюю сеть `infra_internal`.
+- Корневой сертификат публикуется в `branding/assets/root_ca.crt` автоматически; храните его в системе контроля версий **только** для демонстрации. Для production рекомендуется хранить артефакт вне репозитория.
 
-## Vault secrets
-
-Для работы с зашифрованными переменными используйте один из способов:
-
-- интерактивно: `ansible-playbook ... --ask-vault-pass`;
-- файл пароля: создайте `~/.vault_pass.txt` с содержимым пароля и передавайте `--vault-password-file ~/.vault_pass.txt`.
-
-Все Vault-файлы должны начинаться с заголовка `$ANSIBLE_VAULT;`. Держите в них только секреты (пароли БД, токены и т.п.), а публичные значения оставляйте в обычных YAML.
-
-## Repository layout
-
-- `site.yml` — точка входа, импортирует playbooks по слоям.
-- `playbooks/base.yml` — базовая подготовка хостов (Docker и общая сеть).
-- `playbooks/apps.yml` — прикладные роли (private-ca, Caddy, Authentik, Nextcloud, OnlyOffice).
-- `roles/*` — роли приведены к стандартному skeleton'у (`tasks/`, `defaults/`, `handlers/`, `templates/`, `files/`, `vars/`, `meta/`).
-
-## Run
-
-Запуск локального окружения (одна машина):
-
-```bash
-make run
-# или напрямую
-ansible-playbook site.yml
-```
-
-> Если целевой пользователь не имеет passwordless sudo, добавьте `--ask-become-pass`
-> или задайте `ansible_become_password` через Vault/переменные окружения.
-
-Запуск на другом инвентаре:
+## Полезные команды
 
 ```bash
-INVENTORY=inventory/prod/hosts.ini make run
-INVENTORY=inventory/prod/hosts.ini ansible-playbook -i "$INVENTORY" site.yml
+make lint                      # прогнать yamllint + ansible-lint
+ansible-playbook site.yml -vvv # отладочный запуск
+ansible-vault edit group_vars/dev/vault.yml
 ```
 
-> Если вы запускаете команды из подкаталога (например, `playbooks/`), используйте относительные пути: `ansible-playbook -i ../inventory/local.ini ../site.yml`.
+## CI
 
-Типичный порядок выполнения:
-
-1. Установить Docker Engine и создать сеть `infra_internal`.
-2. Развернуть private-ca — он сгенерирует корневой сертификат и поднимет ACME-эндпоинт `https://private-ca:9000/acme/acme/directory`.
-3. Развернуть Caddy, который автоматически получит TLS-сертификаты у private-ca.
-4. Поднять Authentik (Postgres, Redis, server, worker).
-5. Поднять Nextcloud (MariaDB, Redis, web, cron).
-6. Поднять OnlyOffice DocumentServer.
-
-После успешного запуска сервисы будут доступны по адресам `https://auth.infra.local`, `https://cloud.infra.local` и `https://office.infra.local` (добавьте записи в DNS или `/etc/hosts`). Корневой сертификат внутреннего ЦС сохраняется на прокси-хосте в `/opt/private-ca/config/certs/root_ca.crt` и автоматически скачивается на управляющую машину в `branding/assets/root_ca.crt`. Передайте этот файл администраторам рабочих станций и установите в доверенные корневые хранилища.
-
-## Private CA и доверенные сертификаты
-
-Роль `private_ca` разворачивает [smallstep step-ca](https://smallstep.com/docs/step-ca) в Docker и публикует ACME-эндпоинт для Caddy. Основные настройки (домены, пути, URL ACME) находятся в `group_vars/all.yml`, а секрет `private_ca_password` обязательно задаётся через Vault для каждого окружения.
-
-### Алгоритм внедрения
-
-1. **Задайте пароль ЦС.** Добавьте переменную `private_ca_password` (не короче 12 символов) в `group_vars/<env>/vault.yml` и зашифруйте файл.
-2. **Разверните плейбук.** После первого запуска private-ca сформирует каталоги `/opt/private-ca/…`, запустит контейнер и выгрузит корневой сертификат в `branding/assets/root_ca.crt` на управляющей машине.
-3. **Распространите доверие.** Используйте `branding/assets/root_ca.crt`, чтобы централизованно установить сертификат в доверенные корневые центры сертификации (GPO/MDM/Ansible).
-4. **Настройте внутренний DNS.** Все сервисные домены (`auth.infra.local`, `cloud.infra.local`, `office.infra.local`, `ca.infra.local`) должны указывать на IP reverse-прокси, а запись `private-ca` — на тот же хост для выдачи сертификатов по ACME.
-
-После этого браузеры будут без предупреждений принимать сертификаты, выпущенные Caddy через внутренний ACME. Дополнительную копию корня всегда можно получить с прокси-хоста: `scp proxyhost:/opt/private-ca/config/certs/root_ca.crt branding/assets/root_ca.crt`.
-
-## Quality checks
-
-Перед пушем прогоняйте линтеры:
-
-```bash
-make lint
-# или через pre-commit
-pre-commit run --all-files
-```
-
-CI-пайплайн [.github/workflows/lint.yml](.github/workflows/lint.yml) автоматически запускает `yamllint` и `ansible-lint` на каждом push/PR.
-
-## Troubleshooting
-
-- **option `inventory` already exists:** Ansible читает несколько источников инвентаря одновременно. Убедитесь, что в `ansible.cfg` указан только один `inventory`, и не передавайте такой же путь флагом `-i`. Для дефолтного окружения запускайте `ansible-playbook site.yml` или `make run` без дополнительных параметров.
-- **Failed to lock apt /var/lib/apt/lists:** автоматические обновления могут удерживать блокировки APT. В `playbooks/base.yml` добавлены `pre_tasks`, которые мягко ждут освобождение блокировок и переподнимают `dpkg`. Если пишете собственные роли, используйте аналогичный приём.
-- **`community.docker` требует python docker:** клиент Docker для Python должен быть установлен на контроллере. Создайте виртуальное окружение и поставьте зависимости: `python3 -m venv .venv && source .venv/bin/activate`, затем `pip install --upgrade pip docker` и `make deps`.
-- **Vault:** проверьте пароль (`--ask-vault-pass` или файл). Для разных окружений удобно держать отдельные файлы паролей.
-- **SSH/локальный режим:** в `inventory/local.ini` используется `ansible_connection=local`, поэтому SSH не требуется. Для удалённых хостов настройте ключи и пользователя (`ansible_user`).
-- **Become:** если sudo требует пароль, задайте `ansible_become_password` через vault или используйте `--ask-become-pass`.
-- **Python facts:** ошибки вида `MODULE FAILURE` могут означать отсутствие Python 3 на целевом хосте — установите `python3` вручную или задайте `ansible_python_interpreter`.
-- **Docker compose:** при ошибках вида `docker: 'compose' is not a docker command` установите плагин Docker Compose v2 и убедитесь, что бинарь `docker` доступен в `PATH`.
-
-Дополнительную информацию ищите в официальной документации Ansible: [docs.ansible.com](https://docs.ansible.com/) и Docker Compose: [docs.docker.com/compose](https://docs.docker.com/compose/).
+`.github/workflows/lint.yml` запускает `yamllint` и `ansible-lint` на каждый push/PR. Убедитесь, что локальные линтеры проходят перед коммитом.
 

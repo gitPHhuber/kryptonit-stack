@@ -1,19 +1,28 @@
 ---
-# Default variables for the internal private CA role
-private_ca_project_path: /opt/private-ca
-private_ca_compose_file: docker-compose.yml
-private_ca_compose_pull: missing
-private_ca_image: smallstep/step-ca:latest
+private_ca_image: "smallstep/step-ca:0.27.3"
 private_ca_service_name: private-ca
-private_ca_listen_port: 9000
-private_ca_name: >-
-  {{ brand_name | default('Kryptonit Stack') }} Private CA
-private_ca_hostname: >-
-  ca.{{ base_domain | default('infra.local') }}
-private_ca_password: "CHANGEME"
+private_ca_name: "Infra Private CA"
+private_ca_provisioner: "acme"
+private_ca_admin_provisioner: "admin"
+private_ca_port: 9000
+private_ca_project_path: "/opt/private-ca"
+private_ca_data_subdirs:
+  - config
+  - secrets
+  - db
+private_ca_config_path: >-
+  {{ private_ca_project_path }}/config/ca.json
+private_ca_password_file: >-
+  {{ private_ca_project_path }}/secrets/password.txt
 private_ca_root_cert_path: >-
   {{ private_ca_project_path }}/config/certs/root_ca.crt
-private_ca_config_path: >-
-  {{ private_ca_project_path }}/config/config/ca.json
-private_ca_local_root_cert: >-
-  {{ playbook_dir }}/branding/assets/root_ca.crt
+private_ca_branding_cert: >-
+  {{ playbook_dir | dirname }}/branding/assets/root_ca.crt
+private_ca_dns_names:
+  - "{{ private_ca_hostname }}"
+  - "private-ca"
+private_ca_extra_dns:
+  - >-
+      {{ ('.' in private_ca_hostname)
+         | ternary(private_ca_hostname,
+                   private_ca_hostname ~ '.' ~ base_domain) }}
