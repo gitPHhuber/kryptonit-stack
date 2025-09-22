@@ -1,0 +1,57 @@
+---
+force_ipv4_for_apt: false  # noqa var-naming
+
+docker_apt_force_ipv4_path: /etc/apt/apt.conf.d/99force-ipv4
+
+use_official_docker_repo: true  # noqa var-naming
+docker_package_state: present
+docker_service_state: started
+docker_service_enabled: true
+
+docker_required_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+
+docker_additional_packages: []
+
+docker_compose_plugin_package: docker-compose-plugin
+docker_python_package: python3-docker
+docker_official_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - "{{ docker_compose_plugin_package }}"
+  - "{{ docker_python_package }}"
+docker_default_packages:
+  - docker.io
+  - "{{ docker_compose_plugin_package }}"
+  - "{{ docker_python_package }}"
+
+docker_keyring_path: /etc/apt/keyrings/docker.asc
+docker_repository_filename: docker
+docker_apt_gpg_key_url: https://download.docker.com/linux/ubuntu/gpg
+docker_apt_arch_map:
+  x86_64: amd64
+  amd64: amd64
+  aarch64: arm64
+  arm64: arm64
+  armv7l: armhf
+  armhf: armhf
+docker_apt_architecture: >-
+  {{
+    docker_apt_arch_map.get(
+      (ansible_facts | default({})).get('architecture', 'amd64'),
+      'amd64'
+    )
+  }}
+docker_distribution: >-
+  {{ (ansible_facts | default({})).get('distribution', 'Ubuntu') }}
+docker_distribution_release: >-
+  {{ (ansible_facts | default({})).get('distribution_release', 'jammy') }}
+docker_repository: >-
+  deb [arch={{ docker_apt_architecture }} signed-by={{ docker_keyring_path }}]
+  https://download.docker.com/linux/{{ docker_distribution | lower }}
+  {{ docker_distribution_release }} stable

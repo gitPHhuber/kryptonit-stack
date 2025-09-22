@@ -4,6 +4,9 @@
   become: true
   gather_facts: false
   roles:
+    - role: docker
+      tags:
+        - docker
     - role: network
       tags:
         - network
