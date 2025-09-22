@@ -4,6 +4,11 @@
   become: true
   gather_facts: true
   tasks:
+    - name: Install Docker engine and Compose plugin
+      ansible.builtin.import_role:
+        name: docker
+      tags:
+        - docker
     - name: Load offline Docker images
       ansible.builtin.import_role:
         name: offline_images
