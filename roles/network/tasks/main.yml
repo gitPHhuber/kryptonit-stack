@@ -1,6 +1,6 @@
 ---
 - name: Ensure shared docker network exists
-  community.docker.docker_network:
+  community.docker.docker_network:  # noqa args
     name: "{{ infra_network_name }}"
     driver: "{{ infra_network_driver }}"
     state: present

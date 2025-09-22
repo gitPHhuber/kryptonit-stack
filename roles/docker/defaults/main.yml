@@ -1,14 +1,22 @@
----
-use_official_docker_repo: true         # ставим из официального репо Docker
+docker_use_official_repo: true         # ставим из официального репо Docker
 docker_repo_channel: stable            # stable / nightly / test
+docker_required_packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+docker_packages_official:
 
-# Список пакетов для Debian/Ubuntu
-docker_packages:
   - docker-ce
   - docker-ce-cli
   - containerd.io
   - docker-buildx-plugin
   - docker-compose-plugin
+docker_distro_package: docker.io
+docker_package_state: present
+docker_users: []
+docker_cli_plugin_dir: /usr/lib/docker/cli-plugins
+docker_compose_shim_path: "{{ docker_cli_plugin_dir }}/docker-compose"
+docker_compose_shim_target: /usr/local/bin/docker-compose
 
-# На всякий случай можно включить/выключить установку compose-plugin отдельным флагом
-install_compose_plugin: true

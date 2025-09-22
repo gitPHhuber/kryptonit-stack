@@ -31,24 +31,24 @@
 
 ## Инсталляция / Ограничения сети
 
-- **Force IPv4 для APT.** Роль `base` автоматически пишет `/etc/apt/apt.conf.d/99force-ipv4` с `Acquire::ForceIPv4 "true";`, чтобы избежать долгих таймаутов IPv6.
-- **Fallback после неудачных `apt update`.** При ошибках Ansible выполняет `apt-get clean && rm -rf /var/lib/apt/lists/*` и повторяет `apt-get update -o Acquire::Retries=5`.
-- **Установка Docker в оффлайн-/degraded-сетях.**
-  - Переменная `use_official_docker_repo` (по умолчанию `true`) выбирает, использовать ли `download.docker.com`. При недоступности зеркала роль автоматически откатывается на пакет `docker.io` из стандартного репозитория.
-  - Все URL репозиториев вынесены в `group_vars/all.yml` (`docker_official_repo_base`, `docker_repo_key_url`, `docker_repo_url`) и могут быть переназначены на локальные зеркала.
-  - Если пакеты `docker-compose-plugin`/`docker-compose-v2` недоступны, роль ставит `docker-compose` (v1) и разворачивает shim в `/usr/lib/docker/cli-plugins/docker-compose`, перенаправляющий `docker compose` на бинарник v1.
-  - При наличии установленного Docker роль можно пропустить флагом `--skip-tags docker`.
-- **Предзагрузка образов.** Список образов и их версий хранится в `docker_image_cache` (`group_vars/all.yml`). Разместите заранее выгруженные тарболы в каталоге `images/` — роль загрузит их через `docker load` после копирования на хост.
-- **Fail-fast с подсказками.** При сетевых ошибках задачи выводят рекомендации: переключиться на `docker.io`, проверить ForceIPv4 или использовать оффлайн-образы (`make images-cache`).
+- **Apt-bootstrap под деградировавшие сети.** Роль `bootstrap_apt` временно останавливает `packagekit`/`apt-daily*`, включает `Acquire::ForceIPv4 "true";` при `force_ipv4_for_apt: true`, очищает кэш и выполняет `apt-get update` с таймаутом `apt_timeout_sec` и ретраями `apt_retries`.
+- **Установка Docker с fallback.**
+  - `use_official_docker_repo: false` (значение по умолчанию в `group_vars/all.yml`) переключает установку на системный пакет `docker.io`.
+  - При `use_official_docker_repo: true` используется `download.docker.com` (URL и канал `docker_repo_channel` можно переопределить).
+  - Docker Compose v2 берётся из пакета `docker-compose-v2`; если его нет, роль автоматически ставит `python3-pip`, `pip install docker-compose` и создаёт shim `/usr/lib/docker/cli-plugins/docker-compose`, перенаправляющий на бинарник v1.
+  - Для пропуска роли используйте `--skip-tags docker`.
+- **Предзагрузка образов.** Включите `use_offline_images: true`, положите сохранённые `docker save` тарболы в локальный каталог `images/` и скопируйте их на таргет `/opt/kryptonit/images`. Роль `offline_images` выполнит `docker load -i` для каждого архива.
+- **Префлайт перед сервисами.** Роль `preflight` проверяет доступность Docker/Compose, свободные порты 80/443, объём свободного места на `/` и сообщает об отключённом swap.
 
 ## RF-friendly install
 
 Короткий чек-лист для развёртывания в ограниченных сетях:
 
-1. Убедитесь, что ForceIPv4 включён (файл `/etc/apt/apt.conf.d/99force-ipv4` создаётся ролью `base`).
-2. При необходимости установите Docker заранее (`docker.io`, `docker-compose-v2`) и запускайте `ansible-playbook ... --skip-tags docker`.
-3. Переопределите `use_official_docker_repo=false` и/или `docker_official_repo_base` для внутренних зеркал.
-4. (Опционально) На машине с доступом к интернету выполните `make images-cache`, перенесите каталог `images/` и убедитесь, что tar-архивы подхватываются автоматически.
+1. Оставьте `force_ipv4_for_apt: true`, чтобы APT всегда ходил по IPv4.
+2. Используйте `use_official_docker_repo: false`, чтобы ставить Docker из `docker.io`. При наличии локального зеркала можно включить официальный репозиторий и заменить `docker_official_repo_base`/`docker_repo_channel`.
+3. Docker Compose v2 ставится автоматически; если пакет недоступен, shim создастся сам и будет вызывать `pip`-версию `docker-compose`.
+4. При полностью закрытом интернете сохраните нужные образы через `docker save -o images/<name>.tar` и установите `use_offline_images: true`.
+5. Если Docker уже установлен вручную, запускайте Ansible с `--skip-tags docker`.
 
 ## Быстрый старт
 
@@ -76,9 +76,8 @@
 
 ## Структура плейбуков
 
-- `site.yml` — точка входа; импортирует `playbooks/base.yml` и `playbooks/apps.yml`.
-- `playbooks/base.yml` — подготовка хоста: снятие apt-lock, установка Docker Engine + compose-plugin (роль `docker`), создание сети `infra_internal` (роль `network`).
-- `playbooks/apps.yml` — последовательный деплой сервисов: `private_ca` → `caddy` → `authentik` → `nextcloud` → `onlyoffice`.
+- `site.yml` — единый плей, который выполняет роли в порядке: `bootstrap_apt` → `docker` → `offline_images` → `preflight` → сервисные роли (`network`, `private_ca`, `caddy`, `authentik`, `nextcloud`, `onlyoffice`) → `bootstrap_apt_teardown`.
+- При необходимости можно ограничить запуск отдельных ролей через теги (например, `--skip-tags docker`).
 
 ## Переменные и секреты
 
