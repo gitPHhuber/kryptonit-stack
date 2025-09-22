@@ -27,16 +27,11 @@
 - Ubuntu/Debian с systemd.
 - root-доступ (passwordless sudo или `--ask-become-pass`).
 - Порты 80, 443 и 9000 свободны.
-- Docker Engine 24+ и Docker Compose Plugin v2 (устанавливаются ролью `docker`).
+- Docker Engine 24+ и Docker Compose Plugin v2 (должны быть установлены вручную до запуска плейбуков).
 
 ## Инсталляция / Ограничения сети
 
-- **Apt-bootstrap под деградировавшие сети.** Роль `bootstrap_apt` временно останавливает `packagekit`/`apt-daily*`, включает `Acquire::ForceIPv4 "true";` при `force_ipv4_for_apt: true`, очищает кэш и выполняет `apt-get update` с таймаутом `apt_timeout_sec` и ретраями `apt_retries`.
-- **Установка Docker с fallback.**
-  - `use_official_docker_repo: false` (значение по умолчанию в `group_vars/all.yml`) переключает установку на системный пакет `docker.io`.
-  - При `use_official_docker_repo: true` используется `download.docker.com` (URL и канал `docker_repo_channel` можно переопределить).
-  - Docker Compose v2 берётся из пакета `docker-compose-v2`; если его нет, роль автоматически ставит `python3-pip`, `pip install docker-compose` и создаёт shim `/usr/lib/docker/cli-plugins/docker-compose`, перенаправляющий на бинарник v1.
-  - Для пропуска роли используйте `--skip-tags docker`.
+- **Docker и Compose — внешний предусловие.** Плейбуки не управляют пакетами хоста. Убедитесь, что на целевой машине уже установлены совместимые версии Docker Engine и Docker Compose Plugin, и сервис Docker запущен.
 - **Предзагрузка образов.** Включите `use_offline_images: true`, положите сохранённые `docker save` тарболы в локальный каталог `images/` и скопируйте их на таргет `/opt/kryptonit/images`. Роль `offline_images` выполнит `docker load -i` для каждого архива.
 - **Префлайт перед сервисами.** Роль `preflight` проверяет доступность Docker/Compose, свободные порты 80/443, объём свободного места на `/` и сообщает об отключённом swap.
 
@@ -44,11 +39,9 @@
 
 Короткий чек-лист для развёртывания в ограниченных сетях:
 
-1. Оставьте `force_ipv4_for_apt: true`, чтобы APT всегда ходил по IPv4.
-2. Используйте `use_official_docker_repo: false`, чтобы ставить Docker из `docker.io`. При наличии локального зеркала можно включить официальный репозиторий и заменить `docker_official_repo_base`/`docker_repo_channel`.
-3. Docker Compose v2 ставится автоматически; если пакет недоступен, shim создастся сам и будет вызывать `pip`-версию `docker-compose`.
-4. При полностью закрытом интернете сохраните нужные образы через `docker save -o images/<name>.tar` и установите `use_offline_images: true`.
-5. Если Docker уже установлен вручную, запускайте Ansible с `--skip-tags docker`.
+1. Установите Docker Engine и Compose Plugin из доступного источника (заранее, вручную или через собственный playbook/скрипт).
+2. Убедитесь, что требуемые Docker-образы доступны: либо в публичном реестре, либо подготовлены архивы для `use_offline_images: true`.
+3. При полностью закрытом интернете сохраните нужные образы через `docker save -o images/<name>.tar`, перенесите их в каталог `images/` и включите `use_offline_images: true`.
 
 ## Быстрый старт
 
@@ -76,8 +69,8 @@
 
 ## Структура плейбуков
 
-- `site.yml` — единый плей, который выполняет роли в порядке: `bootstrap_apt` → `docker` → `offline_images` → `preflight` → сервисные роли (`network`, `private_ca`, `caddy`, `authentik`, `nextcloud`, `onlyoffice`) → `bootstrap_apt_teardown`.
-- При необходимости можно ограничить запуск отдельных ролей через теги (например, `--skip-tags docker`).
+- `site.yml` — единый плей, который выполняет роли в порядке: `offline_images` → `preflight` → сервисные роли (`network`, `private_ca`, `caddy`, `authentik`, `nextcloud`, `onlyoffice`).
+- При необходимости можно ограничить запуск отдельных ролей через теги.
 
 ## Переменные и секреты
 
