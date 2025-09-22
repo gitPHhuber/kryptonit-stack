@@ -22,8 +22,10 @@ private_ca_hostname: "private-ca"
 private_ca_project_path: "/opt/private-ca"
 private_ca_port: 9000
 private_ca_name: "Infra Private CA"
-internal_ca_url: "https://private-ca:9000/acme/acme/directory"
-private_ca_root_cert_path: "{{ private_ca_project_path }}/config/certs/root_ca.crt"
+internal_ca_url: >-
+  https://private-ca:9000/acme/acme/directory
+private_ca_root_cert_path: >-
+  {{ private_ca_project_path }}/config/certs/root_ca.crt
 
 docker_image_cache:
   - name: "smallstep/step-ca"
