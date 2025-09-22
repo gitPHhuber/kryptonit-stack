@@ -1,4 +1,3 @@
----
 docker_use_official_repo: true         # ставим из официального репо Docker
 docker_repo_channel: stable            # stable / nightly / test
 docker_required_packages:
@@ -8,6 +7,7 @@ docker_required_packages:
   - gnupg
   - lsb-release
 docker_packages_official:
+
   - docker-ce
   - docker-ce-cli
   - containerd.io
@@ -19,3 +19,4 @@ docker_users: []
 docker_cli_plugin_dir: /usr/lib/docker/cli-plugins
 docker_compose_shim_path: "{{ docker_cli_plugin_dir }}/docker-compose"
 docker_compose_shim_target: /usr/local/bin/docker-compose
+
