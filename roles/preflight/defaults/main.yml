@@ -1,0 +1,6 @@
+---
+preflight_min_disk_gib: 5
+preflight_ports:
+  - 80
+  - 443
+preflight_bytes_per_gib: 1073741824
