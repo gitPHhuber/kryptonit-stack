@@ -1,0 +1,3 @@
+---
+infra_network_name: "infra_internal"  # noqa var-naming
+infra_network_driver: bridge  # noqa var-naming

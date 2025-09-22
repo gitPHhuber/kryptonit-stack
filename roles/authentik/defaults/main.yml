@@ -1,5 +1,13 @@
 ---
-# Default variables for the Authentik role
+authentik_images:
+  server: "ghcr.io/goauthentik/server:2024.2.2"
+  worker: "ghcr.io/goauthentik/server:2024.2.2"
+authentik_postgres_image: "postgres:15-alpine"
+authentik_redis_image: "redis:7-alpine"
 authentik_project_path: /opt/authentik
-authentik_compose_file: docker-compose.yml
-authentik_compose_pull: missing
+authentik_pg_data: "{{ authentik_project_path }}/postgres"
+authentik_redis_data: "{{ authentik_project_path }}/redis"
+authentik_media: "{{ authentik_project_path }}/media"
+authentik_templates: "{{ authentik_project_path }}/templates"
+authentik_geoip: "{{ authentik_project_path }}/geoip"
+authentik_memory_limit: "512m"

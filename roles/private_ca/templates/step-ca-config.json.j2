@@ -1,0 +1,31 @@
+{
+  "address": ":{{ private_ca_port }}",
+  "dnsNames": [{% for name in private_ca_all_dns %}
+    "{{ name }}"{% if not loop.last %},{% endif %}{% endfor %}
+  ],
+  "logger": {
+    "format": "text"
+  },
+  "db": {
+    "type": "badger",
+    "dataSource": "/home/step/db"
+  },
+  "root": "/home/step/config/certs/root_ca.crt",
+  "crt": "/home/step/config/certs/intermediate_ca.crt",
+  "key": "/home/step/config/secrets/intermediate_ca_key",
+  "authority": {
+    "provisioners": [
+      {
+        "name": "{{ private_ca_provisioner }}",
+        "type": "ACME",
+        "forceCN": true
+      }
+    ],
+    "acme": {
+      "dns": "",
+      "eab": {
+        "required": false
+      }
+    }
+  }
+}

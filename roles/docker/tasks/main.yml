@@ -1,153 +1,228 @@
 ---
-- name: Fail if unsupported OS family
-  ansible.builtin.assert:
-    that:
-      - ansible_os_family in ['Debian']
-    fail_msg: "Currently only Debian/Ubuntu family is supported."
-
-- name: Read current timezone
-  ansible.builtin.command:
-    cmd: timedatectl show -p Timezone --value
-  register: docker_current_timezone
-  changed_when: false
-  failed_when: docker_current_timezone.rc != 0
-
-- name: Set timezone  # noqa command-instead-of-module
-  ansible.builtin.command:
-    cmd: "timedatectl set-timezone {{ timezone }}"
-  when: docker_current_timezone.stdout.strip() != timezone
-  register: docker_timezone_set
-  changed_when: docker_timezone_set.rc == 0
-  failed_when: docker_timezone_set.rc != 0
-
-- name: Install prerequisites
-  ansible.builtin.apt:
-    name:
-      - ca-certificates
-      - curl
-      - gnupg
-      - lsb-release
-    state: present
-    update_cache: true
-    cache_valid_time: 3600
-    force_apt_get: true
-  register: docker_prereq_install
-  retries: 10
-  delay: 6
-  until: docker_prereq_install is succeeded
-  when: ansible_os_family == 'Debian'
-
-- name: Ensure Docker apt keyring directory exists
-  ansible.builtin.file:
-    path: /etc/apt/keyrings
-    state: directory
-    mode: '0755'
-  when: ansible_os_family == 'Debian'
-
-- name: Determine Docker repository distribution
+- name: Determine Docker installation source
   ansible.builtin.set_fact:
-    docker_repo_distribution: >-
-      {{ docker_repo_distribution_map.get(
-        ansible_distribution | default('ubuntu'),
-        (ansible_distribution | default('ubuntu')) | lower
-      ) }}
-  when: ansible_os_family == 'Debian'
+    docker_install_source: >-
+      {{ 'official' if use_official_docker_repo | bool else 'distro' }}
 
-- name: Determine Docker repository release
-  ansible.builtin.set_fact:
-    docker_repo_release: >-
-      {{ ansible_distribution_release
-         | default(ansible_facts.get('lsb', {}).get('codename'))
-         | default('stable') }}
-  when: ansible_os_family == 'Debian'
+- name: Install Docker from official repository when enabled
+  when: docker_install_source == 'official'
+  block:
+    - name: Ensure required packages for apt over HTTPS are present
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: false
+      register: docker_official_prereqs
+      retries: 3
+      delay: 5
+      until: docker_official_prereqs is succeeded
 
-- name: Add Docker GPG key
-  ansible.builtin.shell: |
-    set -o pipefail
-    curl -fsSL {{ docker_repo_base_url }}/{{ docker_repo_distribution }}/gpg \
-      | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    chmod a+r /etc/apt/keyrings/docker.gpg
-  args:
-    creates: /etc/apt/keyrings/docker.gpg
-    executable: /bin/bash
-  when: ansible_os_family == 'Debian'
+    - name: Ensure keyring directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
 
-- name: Resolve Docker architecture
-  ansible.builtin.set_fact:
-    docker_repo_arch: >-
-      {{ docker_arch_map.get(
-        ansible_architecture | default('amd64'),
-        ansible_architecture | default('amd64')
-      ) }}
+    - name: Download Docker GPG key
+      ansible.builtin.get_url:
+        url: "{{ docker_repo_key_url }}"
+        dest: /etc/apt/keyrings/docker.gpg
+        mode: '0644'
+        timeout: 20
+      register: docker_repo_key_download
+      retries: 3
+      delay: 5
+      until: docker_repo_key_download is succeeded
 
-- name: Render Docker repository definition
-  ansible.builtin.template:
-    src: docker.list.j2
-    dest: /etc/apt/sources.list.d/docker.list
-    owner: root
-    group: root
-    mode: '0644'
-  when: ansible_os_family == 'Debian'
+    - name: Configure Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: "{{ docker_repo_url }}"
+        filename: docker
+        state: present
 
-- name: Refresh apt cache after adding Docker repo
-  ansible.builtin.apt:
-    update_cache: true
-    cache_valid_time: 0
-    force_apt_get: true
-  register: docker_repo_cache_refresh
-  retries: 10
-  delay: 6
-  until: docker_repo_cache_refresh is succeeded
-  when: ansible_os_family == 'Debian'
+    - name: Install Docker packages from official repository
+      ansible.builtin.apt:
+        name: "{{ docker_official_packages }}"
+        state: "{{ docker_package_state }}"
+        update_cache: true
+      register: docker_official_install
+      retries: 3
+      delay: 5
+      until: docker_official_install is succeeded
+  rescue:
+    - name: Disable Docker official repository after failure
+      ansible.builtin.file:
+        path: /etc/apt/sources.list.d/docker.list
+        state: absent
 
-- name: Check if docker-ce is available in APT
-  ansible.builtin.command: apt-cache policy docker-ce
-  register: docker_ce_policy
-  changed_when: false
-  failed_when: false
-  when: ansible_os_family == 'Debian'
+    - name: Inform about fallback to distribution packages
+      ansible.builtin.debug:
+        msg: >-
+          Не удалось обратиться к официальному репозиторию Docker.
+          Переключаюсь на установку из docker.io (установите
+          use_official_docker_repo=false или подготовьте оффлайн-образы через
+          make images-cache).
 
-- name: Install Docker CE stack (official repo)
-  ansible.builtin.apt:
-    update_cache: true
-    name:
-      - docker-ce
-      - docker-ce-cli
-      - containerd.io
-      - docker-buildx-plugin
-      - docker-compose-plugin
-    state: present
-    force_apt_get: true
-  register: docker_ce_install
-  retries: 10
-  delay: 6
-  until: docker_ce_install is succeeded
-  when:
-    - ansible_os_family == 'Debian'
-    - docker_ce_policy.stdout is search('Candidate:\\s+(?!none)')
+    - name: Switch Docker installation source to distribution
+      ansible.builtin.set_fact:
+        docker_install_source: 'distro'
 
-- name: Install Docker from Ubuntu repo (docker.io)
-  ansible.builtin.apt:
-    update_cache: true
-    name: docker.io
-    state: present
-    force_apt_get: true
-  register: docker_io_install
-  retries: 10
-  delay: 6
-  until: docker_io_install is succeeded
-  when:
-    - ansible_os_family == 'Debian'
-    - docker_ce_policy.stdout is search('Candidate:\\s+none')
+- name: Install Docker from distribution repositories
+  when: docker_install_source == 'distro'
+  block:
+    - name: Install Docker packages from distribution
+      ansible.builtin.apt:
+        name: "{{ docker_distro_packages }}"
+        state: "{{ docker_package_state }}"
+        update_cache: true
+      register: docker_distro_install
+      retries: 3
+      delay: 5
+      until: docker_distro_install is succeeded
+  rescue:
+    - name: Fail when distribution packages are unavailable
+      ansible.builtin.fail:
+        msg: >-
+          Не удалось установить Docker из репозиториев дистрибутива.
+          Проверьте ForceIPv4, переключитесь на docker.io
+          (use_official_docker_repo=false) или используйте оффлайн-архивы
+          контейнеров (make images-cache).
 
-- name: Ensure docker service is enabled & started
+- name: Ensure docker service is enabled and started
   ansible.builtin.service:
     name: docker
     state: started
     enabled: true
 
-- name: Ensure shared Docker network exists
-  community.docker.docker_network:  # noqa: syntax-check[unknown-module]
-    name: "{{ docker_infra_network }}"
-    driver: bridge
+- name: Ensure docker users are in group
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_users }}"
+  when: docker_users | length > 0
+
+- name: Attempt to install Docker Compose plugin candidates
+  ansible.builtin.apt:
+    name: "{{ item }}"
     state: present
+    update_cache: false
+  loop: "{{ docker_compose_plugin_candidates | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  register: docker_compose_plugin_attempts
+  failed_when: false
+
+- name: Collect successful compose plugin installs
+  ansible.builtin.set_fact:
+    docker_compose_successes: >-
+      {{ (docker_compose_plugin_attempts.results
+          if docker_compose_plugin_attempts is defined else [])
+         | selectattr('rc', 'defined')
+         | selectattr('rc', 'equalto', 0)
+         | list }}
+
+- name: Determine Compose plugin availability
+  ansible.builtin.set_fact:
+    docker_compose_plugin_status: >-
+      {{ 'plugin' if docker_compose_successes | default([]) | length > 0
+         else 'missing' }}
+
+- name: Install docker-compose legacy package for shim
+  when: docker_compose_plugin_status == 'missing'
+  block:
+    - name: Install docker-compose v1 package
+      ansible.builtin.apt:
+        name: docker-compose
+        state: present
+        update_cache: false
+      register: docker_compose_legacy_install
+      retries: 3
+      delay: 5
+      until: docker_compose_legacy_install is succeeded
+
+    - name: Ensure docker CLI plugin directory exists
+      ansible.builtin.file:
+        path: "{{ docker_compose_shim_path | dirname }}"
+        state: directory
+        mode: '0755'
+
+    - name: Deploy docker compose v2 shim
+      ansible.builtin.copy:
+        dest: "{{ docker_compose_shim_path }}"
+        mode: '0755'
+        content: |-
+          #!/bin/sh
+          exec /usr/bin/docker-compose "$@"
+
+    - name: Notify about docker compose shim usage
+      ansible.builtin.debug:
+        msg: >-
+          docker-compose-plugin недоступен, настроен shim.
+          При первой возможности установите docker-compose-plugin
+          или пакет docker-compose-v2.
+
+- name: Check docker compose availability
+  ansible.builtin.command: docker compose version
+  register: docker_compose_result
+  changed_when: false
+
+- name: Display docker compose version
+  ansible.builtin.debug:
+    msg: "Docker Compose {{ docker_compose_result.stdout }} is available"
+  when: docker_compose_result.stdout is defined
+
+- name: Ensure directory for cached Docker archives exists
+  ansible.builtin.file:
+    path: "{{ docker_archive_remote_dir }}"
+    state: directory
+    mode: '0755'
+  when: (docker_image_cache | default([])) | length > 0
+
+- name: Gather cached Docker image archive availability
+  ansible.builtin.stat:
+    path: "{{ item.archive }}"
+  loop: "{{ docker_image_cache | default([]) }}"
+  loop_control:
+    label: "{{ item.image | default(item.archive) }}"
+  register: docker_cached_archives
+  delegate_to: localhost
+  when: (docker_image_cache | default([])) | length > 0
+
+- name: Collect Docker cache stat results
+  ansible.builtin.set_fact:
+    docker_cached_archive_results: >-
+      {{ docker_cached_archives.results
+         if docker_cached_archives is defined else [] }}
+  when: (docker_image_cache | default([])) | length > 0
+
+- name: Copy cached Docker image archives when available
+  ansible.builtin.copy:
+    src: "{{ item.item.archive }}"
+    dest: "{{ docker_archive_remote_dir }}/{{ item.item.archive | basename }}"
+    mode: '0644'
+    force: false
+  loop: "{{ docker_cached_archive_results | default([]) }}"
+  when:
+    - (docker_image_cache | default([])) | length > 0
+    - item.stat.exists
+  loop_control:
+    label: "{{ item.item.image | default(item.item.archive) }}"
+
+- name: Load Docker images from archives
+  ansible.builtin.command: >-
+    docker load -i "{{ docker_archive_remote_dir
+      ~ '/' ~ (item.item.archive | basename) }}"
+  register: docker_load_from_archive
+  changed_when: docker_load_from_archive.stdout is search('Loaded image')
+  loop: "{{ docker_cached_archive_results | default([]) }}"
+  when:
+    - (docker_image_cache | default([])) | length > 0
+    - item.stat.exists
+  loop_control:
+    label: "{{ item.item.image | default(item.item.archive) }}"

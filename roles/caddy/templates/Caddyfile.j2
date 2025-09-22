@@ -1,0 +1,20 @@
+{
+{% if not caddy_config_auto_https %}
+  auto_https off
+{% else %}
+  acme_ca {{ internal_ca_url }}
+  email {{ caddy_admin_email }}
+{% endif %}
+}
+
+{{ auth_domain }} {
+  reverse_proxy {{ authentik_upstream }}
+}
+
+{{ cloud_domain }} {
+  reverse_proxy {{ nextcloud_upstream }}
+}
+
+{{ office_domain }} {
+  reverse_proxy {{ onlyoffice_upstream }}
+}

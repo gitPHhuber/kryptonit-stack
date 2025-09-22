@@ -1,0 +1,54 @@
+---
+- name: Ensure Caddy project directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ caddy_project_path }}"
+    - "{{ caddy_data_path }}"
+    - "{{ caddy_project_path }}/config"
+
+- name: Render Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config_path }}"
+    mode: '0644'
+
+- name: Wait for ACME endpoint to become available
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ private_ca_port }}"
+    delay: 5
+    timeout: 120
+  when: caddy_config_auto_https | bool
+
+- name: Deploy Caddy reverse proxy
+  community.docker.docker_compose_v2:
+    project_name: caddy
+    definition:
+      version: '3.9'
+      services:
+        caddy:
+          image: "{{ caddy_image }}"
+          container_name: caddy
+          restart: unless-stopped
+          environment:
+            CADDY_ADMIN: 'off'
+          volumes:
+            - "{{ caddy_config_path }}:/etc/caddy/Caddyfile:ro"
+            - "{{ caddy_data_path }}:/data"
+            - "{{ caddy_project_path }}/config:/config"
+          ports:
+            - "80:80"
+            - "443:443"
+          healthcheck:
+            test: ["CMD", "caddy", "version"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+          networks:
+            - "{{ infra_network_name }}"
+      networks:
+        "{{ infra_network_name }}":
+          external: true

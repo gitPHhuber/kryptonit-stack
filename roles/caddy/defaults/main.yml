@@ -1,0 +1,7 @@
+---
+caddy_image: "caddy:2.7"
+caddy_project_path: /opt/caddy
+caddy_config_path: "{{ caddy_project_path }}/Caddyfile"
+caddy_data_path: "{{ caddy_project_path }}/data"
+caddy_config_auto_https: true
+caddy_admin_email: "admin@{{ base_domain }}"

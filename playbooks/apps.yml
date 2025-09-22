@@ -1,38 +1,21 @@
 ---
-- name: Central TLS reverse proxy (Caddy)
-  hosts: proxyhost
+- name: Deploy application stack
+  hosts: infra
   become: true
+  gather_facts: false
   roles:
     - role: private_ca
       tags:
-        - private-ca
-        - tls
-    - role: caddy_proxy
+        - private_ca
+    - role: caddy
       tags:
         - caddy
-        - proxy
-
-- name: Authentik SSO
-  hosts: authhost
-  become: true
-  roles:
     - role: authentik
       tags:
         - authentik
-        - sso
-
-- name: Nextcloud
-  hosts: cloudhost
-  become: true
-  roles:
     - role: nextcloud
       tags:
         - nextcloud
-
-- name: OnlyOffice DocumentServer
-  hosts: officehost
-  become: true
-  roles:
     - role: onlyoffice
       tags:
         - onlyoffice

@@ -1,7 +1,13 @@
 ---
 nextcloud_project_path: /opt/nextcloud
-nextcloud_compose_file: docker-compose.yml
-nextcloud_fs_owner: www-data
-nextcloud_fs_group: www-data
-nextcloud_fs_mode: '0750'
-nextcloud_compose_pull: missing
+nextcloud_data_path: "{{ nextcloud_project_path }}/data"
+nextcloud_db_path: "{{ nextcloud_project_path }}/mariadb"
+nextcloud_redis_path: "{{ nextcloud_project_path }}/redis"
+nextcloud_image: "nextcloud:27-apache"
+nextcloud_cron_image: "nextcloud:27-apache"
+nextcloud_mariadb_image: "mariadb:10.11"
+nextcloud_redis_image: "redis:7-alpine"
+nextcloud_timezone: "{{ timezone | default('UTC') }}"
+nextcloud_php_memory_limit: "512M"
+nextcloud_trusted_domains:
+  - "{{ cloud_domain }}"

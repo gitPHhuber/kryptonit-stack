@@ -1,43 +1,46 @@
 ---
-- name: Ensure OnlyOffice project dir
+- name: Ensure OnlyOffice directories exist
   ansible.builtin.file:
-    path: "{{ onlyoffice_project_path }}"
+    path: "{{ item }}"
     state: directory
     mode: '0755'
-
-- name: Ensure OnlyOffice data directories
-  ansible.builtin.file:
-    path: "{{ onlyoffice_project_path }}/{{ item }}"
-    state: directory
-    mode: '0750'
   loop:
-    - data
-    - log
-    - lib
+    - "{{ onlyoffice_project_path }}"
+    - "{{ onlyoffice_project_path }}/data"
+    - "{{ onlyoffice_project_path }}/logs"
 
-# roles/onlyoffice/templates/docker-compose.yml.j2 должен существовать
-- name: Render OnlyOffice docker-compose.yml
-  ansible.builtin.template:
-    src: docker-compose.yml.j2
-    dest: "{{ onlyoffice_project_path }}/{{ onlyoffice_compose_file }}"
-    mode: '0644'
-  notify: Apply OnlyOffice stack
-
-- name: Ensure OnlyOffice stack is running  # noqa command-instead-of-module
-  ansible.builtin.command:
-    cmd: >-
-      docker compose -f {{ onlyoffice_compose_file }}
-      up -d --remove-orphans
-  args:
-    chdir: "{{ onlyoffice_project_path }}"
-  register: onlyoffice_compose
-  failed_when: onlyoffice_compose.rc != 0
-  changed_when: >-
-    onlyoffice_compose.rc == 0 and (
-      onlyoffice_compose.stdout is search(
-        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
-      )
-      or onlyoffice_compose.stderr is search(
-        '(?i)(Creating|Recreating|Starting|Started|Pulling|Downloading|Building|Removing)'
-      )
-    )
+- name: Deploy OnlyOffice Document Server
+  community.docker.docker_compose_v2:
+    project_name: onlyoffice
+    definition:
+      version: '3.9'
+      services:
+        onlyoffice:
+          image: "{{ onlyoffice_image }}"
+          container_name: onlyoffice
+          restart: unless-stopped
+          environment:
+            JWT_ENABLED: >-
+              {{ onlyoffice_jwt_enabled | ternary('true', 'false') }}
+            JWT_SECRET: >-
+              {{ onlyoffice_jwt_secret | mandatory }}
+            JWT_HEADER: AuthorizationJwt
+          volumes:
+            - >-
+              {{ onlyoffice_project_path }}/data:/var/www/onlyoffice/Data
+            - >-
+              {{ onlyoffice_project_path }}/logs:/var/log/onlyoffice
+          expose:
+            - "80"
+          healthcheck:
+            test:
+              - CMD-SHELL
+              - pgrep supervisord
+            interval: 30s
+            timeout: 10s
+            retries: 5
+          networks:
+            - "{{ infra_network_name }}"
+      networks:
+        "{{ infra_network_name }}":
+          external: true
