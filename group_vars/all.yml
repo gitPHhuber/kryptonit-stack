@@ -1,6 +1,9 @@
 ---
 force_ipv4_for_apt: false
-use_official_docker_repo: true
+
+use_official_docker_repo: false
+preflight_enable_disk_checks: false
+
 use_offline_images: false
 
 brand_name: "НПК КРИПТОНИТ"
