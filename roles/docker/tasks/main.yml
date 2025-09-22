@@ -146,16 +146,8 @@
     state: started
     enabled: true
 
-- name: Inspect shared Docker network
-  ansible.builtin.command:
-    cmd: "docker network inspect {{ docker_infra_network }}"
-  register: docker_network_inspect
-  changed_when: false
-  failed_when: false
-
-- name: Ensure shared Docker network exists  # noqa command-instead-of-module
-  ansible.builtin.command:
-    cmd: "docker network create {{ docker_infra_network }}"
-  when: docker_network_inspect.rc != 0
-  register: docker_network_create
-  changed_when: docker_network_create.rc == 0
+- name: Ensure shared Docker network exists
+  community.docker.docker_network:  # noqa: syntax-check[unknown-module]
+    name: "{{ docker_infra_network }}"
+    driver: bridge
+    state: present

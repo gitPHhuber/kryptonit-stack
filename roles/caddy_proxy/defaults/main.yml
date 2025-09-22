@@ -4,3 +4,4 @@ caddy_proxy_project_path: /opt/caddy
 caddy_proxy_compose_file: docker-compose.yml
 caddy_proxy_image: caddy:2
 caddy_proxy_compose_pull: missing
+caddy_proxy_auto_https: true
