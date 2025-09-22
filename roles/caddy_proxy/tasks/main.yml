@@ -16,6 +16,7 @@
   ansible.builtin.stat:
     path: "{{ private_ca_root_cert_path }}"
   register: caddy_proxy_private_ca_root
+  when: caddy_proxy_auto_https
 
 - name: Ensure private CA root certificate exists
   ansible.builtin.fail:
@@ -24,7 +25,9 @@
       {{ private_ca_root_cert_path }}.
       Ensure the private_ca role ran successfully on the proxy host
       before configuring Caddy.
-  when: not caddy_proxy_private_ca_root.stat.exists
+  when:
+    - caddy_proxy_auto_https
+    - not caddy_proxy_private_ca_root.stat.exists
 
 - name: Distribute private CA root certificate to Caddy project
   ansible.builtin.copy:
@@ -35,6 +38,7 @@
     mode: '0644'
     remote_src: true
   notify: Apply Caddy stack
+  when: caddy_proxy_auto_https
 
 - name: Render Caddyfile
   ansible.builtin.template:
@@ -62,8 +66,10 @@
             - "443:443/udp"
           networks:
             - infra
+            {% if caddy_proxy_auto_https %}
           environment:
             CADDY_TRUSTED_ROOTS: /etc/caddy/pki/root_ca.crt
+            {% endif %}
           healthcheck:
             test: ["CMD", "caddy", "version"]
             interval: 30s

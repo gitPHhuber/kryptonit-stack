@@ -1,8 +1,12 @@
 {
+{% if caddy_proxy_auto_https %}
         email {{ caddy_admin_email }}
         acme_ca {{ internal_ca_url }}
         acme_ca_root /etc/caddy/pki/root_ca.crt
-        # оставим авто-редиректы включёнными по умолчанию
+{% else %}
+        auto_https off
+{% endif %}
+        # Переключение HTTPS управляется переменной caddy_proxy_auto_https
 }
 
 (security_headers) {

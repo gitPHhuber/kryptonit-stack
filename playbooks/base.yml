@@ -3,6 +3,28 @@
   hosts: all
   become: true
   gather_facts: true
+  pre_tasks:
+    - name: Ensure dpkg is not locked
+      ansible.builtin.shell: |
+        for lock in \
+          /var/lib/dpkg/lock \
+          /var/lib/apt/lists/lock \
+          /var/lib/dpkg/lock-frontend; do
+          while fuser "$lock" >/dev/null 2>&1; do
+            sleep 3
+          done
+        done
+        dpkg --configure -a || true
+      changed_when: false
+
+    - name: Update apt cache with retries
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      register: _apt_update
+      retries: 6
+      delay: 10
+      until: _apt_update is succeeded
   roles:
     - role: docker
       tags:

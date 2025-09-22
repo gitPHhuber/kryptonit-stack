@@ -1,6 +1,6 @@
 ANSIBLE ?= ansible-playbook
 
-INVENTORY ?= inventory/local.ini
+INVENTORY ?=
 
 
 PLAYBOOK ?= site.yml
@@ -15,7 +15,11 @@ lint:
 	ansible-lint --offline
 
 run:
-	$(ANSIBLE) -i $(INVENTORY) $(PLAYBOOK)
+	@if [ -n "$(INVENTORY)" ]; then \
+		$(ANSIBLE) -i "$(INVENTORY)" $(PLAYBOOK); \
+	else \
+		$(ANSIBLE) $(PLAYBOOK); \
+	fi
 
 vault:
 	ansible-vault edit group_vars/dev/vault.yml

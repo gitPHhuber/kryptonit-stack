@@ -1,0 +1,20 @@
+---
+# Несекретные заглушки для локальной разработки, чтобы playbook можно было
+# запустить без Vault. Для реальных окружений замените значениями из Vault.
+private_ca_password: "dev-private-ca-pass!"
+
+ak_db_password: "dev-authentik-db-pass"
+authentik_redis_password: "dev-authentik-redis"
+ak_secret_key: "dev-authentik-secret"
+ak_bootstrap:
+  email: "admin@infra.local"
+  password: "DevBootstrapPass123!"
+  token: ""
+
+nc_db_root_password: "dev-nextcloud-root"
+nc_db_password: "dev-nextcloud-pass"
+
+onlyoffice_jwt_secret: "dev-onlyoffice-jwt"
+
+# Для локальной среды отключаем автоматический HTTPS в Caddy.
+caddy_proxy_auto_https: false
