@@ -18,7 +18,11 @@ internal_ca_url: >-
 private_ca_root_cert_path: >-
   {{ private_ca_project_path }}/config/certs/root_ca.crt
 
-use_official_docker_repo: true
+use_official_docker_repo: false
+force_ipv4_for_apt: true
+use_offline_images: false
+apt_retries: 3
+apt_timeout_sec: 20
 docker_official_repo_base: "https://download.docker.com"
 docker_repo_key_url: >-
   {{ docker_official_repo_base }}/linux/{{ ansible_distribution | lower }}/gpg
@@ -26,7 +30,7 @@ docker_repo_url: >-
   deb [arch={{ ansible_architecture | default('amd64') }}
   signed-by=/etc/apt/keyrings/docker.gpg]
   {{ docker_official_repo_base }}/linux/{{ ansible_distribution | lower }}
-  {{ ansible_distribution_release }} stable
+  {{ ansible_distribution_release }} {{ docker_repo_channel }}
 docker_distro_packages:
   - docker.io
 docker_compose_plugin_candidates:

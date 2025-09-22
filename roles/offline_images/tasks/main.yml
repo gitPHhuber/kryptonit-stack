@@ -1,0 +1,48 @@
+---
+- name: Prepare offline Docker images
+  when: use_offline_images | bool
+  tags:
+    - offline
+  block:
+    - name: Discover offline image archives on controller
+      ansible.builtin.find:
+        paths: "{{ playbook_dir | default('.') }}/images"
+        patterns: "*.tar"
+      register: offline_images_search
+      delegate_to: localhost
+
+    - name: Prepare offline archive path list
+      ansible.builtin.set_fact:
+        offline_images_archives: >-
+          {{ offline_images_search.files | default([])
+             | map(attribute='path') | list }}
+
+    - name: Ensure offline image directory exists on host
+      become: true
+      ansible.builtin.file:
+        path: /opt/kryptonit/images
+        state: directory
+        mode: '0755'
+
+    - name: Copy offline archives to host
+      become: true
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "/opt/kryptonit/images/{{ item | basename }}"
+        mode: '0644'
+      loop: "{{ offline_images_archives }}"
+      when: offline_images_archives | length > 0
+
+    - name: Load offline images if enabled
+      become: true
+      ansible.builtin.shell: |  # noqa command-instead-of-shell
+        set -e
+        for f in /opt/kryptonit/images/*.tar; do
+          [ -f "$f" ] && docker load -i "$f"
+        done
+      args:
+        executable: /bin/bash
+      register: offline_images_load
+      changed_when:
+        - offline_images_load.stdout is defined
+        - (offline_images_load.stdout | trim) != ''
