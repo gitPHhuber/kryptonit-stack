@@ -1,4 +1,9 @@
 ---
+force_ipv4_for_apt: false
+use_official_docker_repo: false
+preflight_enable_disk_checks: false
+use_offline_images: false
+
 brand_name: "НПК КРИПТОНИТ"
 timezone: "Europe/Moscow"
 
@@ -18,7 +23,6 @@ internal_ca_url: >-
 private_ca_root_cert_path: >-
   {{ private_ca_project_path }}/config/certs/root_ca.crt
 
-use_offline_images: false
 docker_image_cache:
   - name: "smallstep/step-ca"
     tag: "0.27.3"

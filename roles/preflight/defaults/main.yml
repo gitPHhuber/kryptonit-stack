@@ -1,5 +1,5 @@
 ---
-preflight_min_disk_gib: 5
+preflight_root_required_gib: 5
 preflight_ports:
   - 80
   - 443

@@ -38,45 +38,66 @@
   tags:
     - preflight
 
-- name: Collect root filesystem facts
+- name: Set default root mount if not provided
   ansible.builtin.set_fact:
-    preflight_root_mount: >-
-      {{ (ansible_facts.get('ansible_mounts', []))
-         | selectattr('mount', 'equalto', '/')
-         | list | first | default({}) }}
+    preflight_root_mount: "{{ preflight_root_mount | default('/') }}"
+  when: preflight_enable_disk_checks | default(false) | bool
   tags:
     - preflight
 
-- name: Calculate disk requirement thresholds
+- name: Calculate available disk space on root (bytes)
   ansible.builtin.set_fact:
     preflight_available_bytes: >-
-      {{ preflight_root_mount.size_available | default(0) | int }}
-    preflight_required_bytes: >-
-      {{ preflight_min_disk_gib * preflight_bytes_per_gib }}
-  when: preflight_root_mount | length > 0
+      {{
+        (
+          ansible_facts.mounts
+          | default(ansible_facts.ansible_mounts | default([]))
+        )
+        | selectattr('mount', 'equalto', preflight_root_mount | default('/'))
+        | map(attribute='size_available')
+        | first
+        | default(0)
+      }}
+  when: preflight_enable_disk_checks | default(false) | bool
   tags:
     - preflight
 
-- name: Calculate available disk space in GiB
+- name: Calculate required disk space on root (bytes)
+  ansible.builtin.set_fact:
+    preflight_required_bytes: >-
+      {{
+        (
+          (preflight_root_required_gib | default(5) | float)
+          * (preflight_bytes_per_gib | default(1073741824) | int)
+        ) | int
+      }}
+  when: preflight_enable_disk_checks | default(false) | bool
+  tags:
+    - preflight
+
+- name: Convert to GiB
   ansible.builtin.set_fact:
     preflight_root_available_gib: >-
-      {{
-        ((preflight_available_bytes | int) / preflight_bytes_per_gib)
-        | float
-      }}
-  when: preflight_root_mount | length > 0
+      {{ (preflight_available_bytes | int) / (1024**3) }}
+  when: preflight_enable_disk_checks | default(false) | bool
   tags:
     - preflight
 
 - name: Assert sufficient disk space is available
   ansible.builtin.assert:
     that:
-      - preflight_root_mount | length > 0
-      - (preflight_available_bytes | int) >= (preflight_required_bytes | int)
-    fail_msg: >-
-      Требуется минимум {{ preflight_min_disk_gib }} ГиБ свободного места
-      на /. Доступно:
-      {{ '%.2f' | format(preflight_root_available_gib | float) }} ГиБ.
+      - >
+        (preflight_available_bytes | default(0) | int)
+        >= (preflight_required_bytes | default(0) | int)
+      - >
+        (preflight_root_available_gib | default(0) | float)
+        >= (preflight_root_required_gib | default(5) | float)
+    fail_msg: |-
+      Требуется минимум {{ preflight_root_required_gib | default(5) }} ГиБ
+      на {{ preflight_root_mount | default('/') }}.
+      Доступно:
+        {{ preflight_root_available_gib | default('0') | round(2) }} ГиБ.
+  when: preflight_enable_disk_checks | default(false) | bool
   tags:
     - preflight
 
