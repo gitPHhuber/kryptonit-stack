@@ -4,66 +4,45 @@
   become: true
   gather_facts: true
   tasks:
-    - name: Bootstrap apt environment
-      ansible.builtin.import_role:
-        name: bootstrap_apt
-
-    - name: Install Docker engine and compose
-      ansible.builtin.import_role:
-        name: docker
-      tags:
-        - docker
-
     - name: Load offline Docker images
       ansible.builtin.import_role:
         name: offline_images
-
     - name: Run preflight checks
       ansible.builtin.import_role:
         name: preflight
-
     - name: Configure Docker network
       when: "'infra' in group_names"
       ansible.builtin.import_role:
         name: network
       tags:
         - network
-
     - name: Deploy private CA
       when: "'infra' in group_names"
       ansible.builtin.import_role:
         name: private_ca
       tags:
         - private_ca
-
     - name: Deploy Caddy
       when: "'infra' in group_names"
       ansible.builtin.import_role:
         name: caddy
       tags:
         - caddy
-
     - name: Deploy Authentik
       when: "'infra' in group_names"
       ansible.builtin.import_role:
         name: authentik
       tags:
         - authentik
-
     - name: Deploy Nextcloud
       when: "'infra' in group_names"
       ansible.builtin.import_role:
         name: nextcloud
       tags:
         - nextcloud
-
     - name: Deploy OnlyOffice
       when: "'infra' in group_names"
       ansible.builtin.import_role:
         name: onlyoffice
       tags:
         - onlyoffice
-
-    - name: Restore apt auto updater services
-      ansible.builtin.import_role:
-        name: bootstrap_apt_teardown

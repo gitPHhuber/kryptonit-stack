@@ -1,58 +1,9 @@
 ---
-- name: Base system preparation
+- name: Base container stack preparation
   hosts: all
   become: true
-  gather_facts: true
-  pre_tasks:
-    - name: Force apt to use IPv4
-      ansible.builtin.copy:
-        dest: /etc/apt/apt.conf.d/99force-ipv4
-        content: "Acquire::ForceIPv4 \"true\";\n"
-        mode: '0644'
-
-    - name: Ensure dpkg is not locked
-      ansible.builtin.shell: |
-        for lock in \
-          /var/lib/dpkg/lock \
-          /var/lib/apt/lists/lock \
-          /var/lib/dpkg/lock-frontend; do
-          while fuser "$lock" >/dev/null 2>&1; do
-            sleep 3
-          done
-        done
-        dpkg --configure -a || true
-      changed_when: false
-
-    - name: Refresh apt cache with clean fallback
-      block:
-        - name: Update apt cache with retries
-          ansible.builtin.apt:
-            update_cache: true
-            cache_valid_time: 3600
-          register: _apt_update
-          retries: 3
-          delay: 10
-          until: _apt_update is succeeded
-      rescue:
-        - name: Clean apt cache before retrying update
-          ansible.builtin.shell: |
-            set -e
-            apt-get clean
-            rm -rf /var/lib/apt/lists/*
-          args:
-            warn: false
-          changed_when: false
-
-        - name: Retry apt update with forced retries
-          ansible.builtin.command:  # noqa command-instead-of-module
-            cmd: apt-get update -o Acquire::Retries=5
-          register: _apt_update_force
-          changed_when: false
-          failed_when: _apt_update_force.rc != 0
+  gather_facts: false
   roles:
-    - role: docker
-      tags:
-        - docker
     - role: network
       tags:
         - network
