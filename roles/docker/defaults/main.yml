@@ -1,19 +1,21 @@
 ---
-docker_package_state: present
-docker_official_packages:
+docker_use_official_repo: true         # ставим из официального репо Docker
+docker_repo_channel: stable            # stable / nightly / test
+docker_required_packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+docker_packages_official:
   - docker-ce
   - docker-ce-cli
   - containerd.io
   - docker-buildx-plugin
   - docker-compose-plugin
-docker_repo_key_url: >-
-  {{ docker_official_repo_base | default('https://download.docker.com')
-     ~ '/linux/' ~ (ansible_distribution | lower) ~ '/gpg' }}
-docker_repo_url: >-
-  deb [arch={{ ansible_architecture | default('amd64') }}
-  signed-by=/etc/apt/keyrings/docker.gpg]
-  {{ docker_official_repo_base | default('https://download.docker.com')
-     ~ '/linux/' ~ (ansible_distribution | lower) }}
-  {{ ansible_distribution_release }} stable
-docker_archive_remote_dir: /var/tmp/docker-image-cache
+docker_distro_package: docker.io
+docker_package_state: present
 docker_users: []
+docker_cli_plugin_dir: /usr/lib/docker/cli-plugins
+docker_compose_shim_path: "{{ docker_cli_plugin_dir }}/docker-compose"
+docker_compose_shim_target: /usr/local/bin/docker-compose

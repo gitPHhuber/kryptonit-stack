@@ -1,0 +1,90 @@
+---
+- name: Verify Docker CLI is available
+  ansible.builtin.command: docker --version
+  register: preflight_docker_version
+  changed_when: false
+  tags:
+    - preflight
+
+- name: Verify Docker Compose is available
+  ansible.builtin.command: docker compose version
+  register: preflight_compose_version
+  changed_when: false
+  tags:
+    - preflight
+
+- name: Display Docker version information
+  ansible.builtin.debug:
+    msg: "{{ preflight_docker_version.stdout }}"
+  when: preflight_docker_version.stdout is defined
+  tags:
+    - preflight
+
+- name: Display Docker Compose version information
+  ansible.builtin.debug:
+    msg: "{{ preflight_compose_version.stdout }}"
+  when: preflight_compose_version.stdout is defined
+  tags:
+    - preflight
+
+- name: Ensure required ports are free
+  ansible.builtin.wait_for:
+    port: "{{ item }}"
+    state: stopped
+    timeout: 1
+  loop: "{{ preflight_ports }}"
+  loop_control:
+    label: "port {{ item }}"
+  tags:
+    - preflight
+
+- name: Collect root filesystem facts
+  ansible.builtin.set_fact:
+    preflight_root_mount: >-
+      {{ (ansible_facts.get('ansible_mounts', []))
+         | selectattr('mount', 'equalto', '/')
+         | list | first | default({}) }}
+  tags:
+    - preflight
+
+- name: Calculate disk requirement thresholds
+  ansible.builtin.set_fact:
+    preflight_available_bytes: >-
+      {{ preflight_root_mount.size_available | default(0) | int }}
+    preflight_required_bytes: >-
+      {{ preflight_min_disk_gib * preflight_bytes_per_gib }}
+  when: preflight_root_mount | length > 0
+  tags:
+    - preflight
+
+- name: Calculate available disk space in GiB
+  ansible.builtin.set_fact:
+    preflight_root_available_gib: >-
+      {{
+        ((preflight_available_bytes | int) / preflight_bytes_per_gib)
+        | float
+      }}
+  when: preflight_root_mount | length > 0
+  tags:
+    - preflight
+
+- name: Assert sufficient disk space is available
+  ansible.builtin.assert:
+    that:
+      - preflight_root_mount | length > 0
+      - (preflight_available_bytes | int) >= (preflight_required_bytes | int)
+    fail_msg: >-
+      Требуется минимум {{ preflight_min_disk_gib }} ГиБ свободного места
+      на /. Доступно:
+      {{ '%.2f' | format(preflight_root_available_gib | float) }} ГиБ.
+  tags:
+    - preflight
+
+- name: Warn when swap is disabled
+  ansible.builtin.debug:
+    msg: >-
+      Swap не настроен. Рассмотрите возможность включения swap при
+      высоких нагрузках.
+  when: (ansible_facts.ansible_swaptotal_mb | default(0)) | int == 0
+  tags:
+    - preflight
