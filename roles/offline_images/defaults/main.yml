@@ -1,0 +1,4 @@
+---
+use_offline_images: false
+offline_images_dir: /opt/kryptonit-stack/images
+offline_archives: []

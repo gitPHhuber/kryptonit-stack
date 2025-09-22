@@ -1,6 +1,6 @@
 ---
 - name: Prepare offline Docker images
-  when: use_offline_images | bool
+  when: (use_offline_images | default(false)) | bool
   tags:
     - offline
   block:

@@ -5,6 +5,8 @@ use_official_docker_repo: false
 preflight_enable_disk_checks: false
 
 use_offline_images: false
+offline_images_dir: /opt/kryptonit-stack/images
+offline_archives: []
 
 brand_name: "НПК КРИПТОНИТ"
 timezone: "Europe/Moscow"
@@ -17,13 +19,11 @@ office_domain: "office.{{ base_domain }}"
 infra_network_name: "infra_internal"
 
 private_ca_hostname: "private-ca"
-private_ca_project_path: /opt/private-ca
+private_ca_project_path: "/opt/private-ca"
 private_ca_port: 9000
 private_ca_name: "Infra Private CA"
-internal_ca_url: >-
-  https://private-ca:9000/acme/acme/directory
-private_ca_root_cert_path: >-
-  {{ private_ca_project_path }}/config/certs/root_ca.crt
+internal_ca_url: "https://private-ca:9000/acme/acme/directory"
+private_ca_root_cert_path: "{{ private_ca_project_path }}/config/certs/root_ca.crt"
 
 docker_image_cache:
   - name: "smallstep/step-ca"
