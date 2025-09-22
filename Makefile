@@ -1,10 +1,11 @@
 ANSIBLE ?= ansible-playbook
-ANSIBLE_COLLECTIONS_PATH ?= ./collections:~/.ansible/collections:/usr/share/ansible/collections
+PYTHON_USER_SITE := $(shell python3 -c "import site; print(site.getusersitepackages())")
+ANSIBLE_COLLECTIONS_PATH ?= ./collections:~/.ansible/collections:/usr/share/ansible/collections:$(PYTHON_USER_SITE)/ansible_collections
 export ANSIBLE_COLLECTIONS_PATH
 INVENTORY ?= inventory/local.ini
 PLAYBOOK ?= site.yml
 
-.PHONY: deps lint run vault images-cache bootstrap-tools
+.PHONY: deps lint run vault images-cache bootstrap-tools offline-load offline-run
 
 bootstrap-tools:
 	@command -v python3 >/dev/null 2>&1 || { echo "python3 is required" >&2; exit 1; }
@@ -28,3 +29,9 @@ vault:
 
 images-cache:
 	$(ANSIBLE) -i localhost, -c local playbooks/images-cache.yml
+
+offline-load:
+	$(ANSIBLE) -i "$(INVENTORY)" offline-run.yml -e mode=load -K
+
+offline-run:
+	$(ANSIBLE) -i "$(INVENTORY)" offline-run.yml -e mode=run -K
