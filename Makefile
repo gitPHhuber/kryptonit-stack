@@ -27,7 +27,8 @@ vault:
 	ansible-vault edit group_vars/dev/vault.yml
 
 fetch-images:
-	$(ANSIBLE) -i localhost, -c local playbooks/images.yml -e mode=fetch
+	$(ANSIBLE) -i "$(INVENTORY)" playbooks/images.yml -e mode=fetch
+
 
 load-images:
 	$(ANSIBLE) -i "$(INVENTORY)" playbooks/images.yml -e mode=offline
