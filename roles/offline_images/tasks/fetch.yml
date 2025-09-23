@@ -1,0 +1,62 @@
+---
+- name: Ensure offline image catalog is defined
+  ansible.builtin.assert:
+    that:
+      - offline_images_catalog | length > 0
+    fail_msg: |-
+      offline_images_catalog is empty. Define the list of images in
+      group_vars/all.yml.
+
+- name: Validate offline image entries
+  ansible.builtin.assert:
+    that:
+      - item.image is defined
+      - item.archive is defined
+    fail_msg: |-
+      Each offline image must define both "image" and "archive" fields.
+  loop: "{{ offline_images_catalog }}"
+  loop_control:
+    label: "{{ item.image | default(item) }}"
+
+- name: Ensure local cache directory exists
+  ansible.builtin.file:
+    path: "{{ offline_images_cache_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Gather existing archive information
+  ansible.builtin.stat:
+    path: "{{ offline_images_cache_dir.rstrip('/') }}/{{ item.archive }}"
+  loop: "{{ offline_images_catalog }}"
+  loop_control:
+    label: "{{ item.image }}"
+  register: offline_images_existing
+
+- name: Combine catalog with archive state
+  ansible.builtin.set_fact:
+    offline_images_combined: >-
+      {{ offline_images_catalog | zip(offline_images_existing.results) | list }}
+
+- name: Pull Docker images when required
+  community.docker.docker_image:
+    name: "{{ item.0.image }}"
+    source: pull
+    force_source: "{{ offline_images_force_fetch | bool }}"
+  loop: "{{ offline_images_combined }}"
+  loop_control:
+    label: "{{ item.0.image }}"
+  when: (offline_images_force_fetch | bool) or (not item.1.stat.exists)
+  tags:
+    - skip_ansible_lint
+
+- name: Save Docker images to cache
+  ansible.builtin.command:
+    cmd: >-
+      docker image save --output
+      {{ offline_images_cache_dir.rstrip('/') }}/{{ item.0.archive }}
+      {{ item.0.image }}
+  loop: "{{ offline_images_combined }}"
+  loop_control:
+    label: "{{ item.0.image }}"
+  when: (offline_images_force_fetch | bool) or (not item.1.stat.exists)
+  changed_when: true

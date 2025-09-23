@@ -1,13 +1,4 @@
 ---
-force_ipv4_for_apt: false
-
-use_official_docker_repo: false
-preflight_enable_disk_checks: false
-
-use_offline_images: false
-offline_images_dir: /opt/kryptonit-stack/images
-offline_archives: []
-
 brand_name: "НПК КРИПТОНИТ"
 timezone: "Europe/Moscow"
 
@@ -19,56 +10,10 @@ office_domain: "office.{{ base_domain }}"
 infra_network_name: "infra_internal"
 
 private_ca_hostname: "private-ca"
-private_ca_project_path: "/opt/private-ca"
 private_ca_port: 9000
 private_ca_name: "Infra Private CA"
 internal_ca_url: >-
-  https://private-ca:9000/acme/acme/directory
-private_ca_root_cert_path: >-
-  {{ private_ca_project_path }}/config/certs/root_ca.crt
-
-docker_image_cache:
-  - name: "smallstep/step-ca"
-    tag: "0.27.3"
-    image: >-
-      {{ private_ca_image | default('smallstep/step-ca:0.27.3') }}
-    archive: "images/step-ca_0.27.3.tar"
-  - name: "caddy"
-    tag: "2.7"
-    image: >-
-      {{ caddy_image | default('caddy:2.7') }}
-    archive: "images/caddy_2.7.tar"
-  - name: "ghcr.io/goauthentik/server"
-    tag: "2024.2.2"
-    image: >-
-      {{ authentik_images.server
-         | default('ghcr.io/goauthentik/server:2024.2.2') }}
-    archive: "images/authentik_2024.2.2.tar"
-  - name: "postgres"
-    tag: "15-alpine"
-    image: >-
-      {{ authentik_postgres_image | default('postgres:15-alpine') }}
-    archive: "images/postgres_15-alpine.tar"
-  - name: "redis"
-    tag: "7-alpine"
-    image: >-
-      {{ authentik_redis_image | default('redis:7-alpine') }}
-    archive: "images/redis_7-alpine.tar"
-  - name: "nextcloud"
-    tag: "27-apache"
-    image: >-
-      {{ nextcloud_image | default('nextcloud:27-apache') }}
-    archive: "images/nextcloud_27-apache.tar"
-  - name: "mariadb"
-    tag: "10.11"
-    image: >-
-      {{ nextcloud_mariadb_image | default('mariadb:10.11') }}
-    archive: "images/mariadb_10.11.tar"
-  - name: "onlyoffice/documentserver"
-    tag: "7.5"
-    image: >-
-      {{ onlyoffice_image | default('onlyoffice/documentserver:7.5') }}
-    archive: "images/onlyoffice_documentserver_7.5.tar"
+  https://{{ private_ca_hostname }}:{{ private_ca_port }}/acme/acme/directory
 
 caddy_admin_email: "admin@{{ base_domain }}"
 caddy_config_auto_https: true
@@ -86,3 +31,39 @@ nextcloud_db_name: nextcloud
 nextcloud_db_user: nextcloud
 nextcloud_admin_user: admin
 nextcloud_admin_password: "AdminPass123!"
+
+private_ca_image: "smallstep/step-ca:0.27.3"
+caddy_image: "caddy:2.7"
+authentik_images:
+  server: "ghcr.io/goauthentik/server:2024.2.2"
+  worker: "ghcr.io/goauthentik/server:2024.2.2"
+authentik_postgres_image: "postgres:15-alpine"
+authentik_redis_image: "redis:7-alpine"
+nextcloud_image: "nextcloud:27-apache"
+nextcloud_cron_image: "nextcloud:27-apache"
+nextcloud_mariadb_image: "mariadb:10.11"
+nextcloud_redis_image: "redis:7-alpine"
+onlyoffice_image: "onlyoffice/documentserver:7.5"
+
+offline_images_cache_dir: "{{ playbook_dir | default('.') }}/images"
+offline_images_target_dir: /opt/kryptonit-stack/images
+offline_images_force_fetch: false
+offline_images_catalog:
+  - image: "{{ private_ca_image }}"
+    archive: step-ca_0.27.3.tar
+  - image: "{{ caddy_image }}"
+    archive: caddy_2.7.tar
+  - image: "{{ authentik_images.server }}"
+    archive: authentik_2024.2.2.tar
+  - image: "{{ authentik_postgres_image }}"
+    archive: postgres_15-alpine.tar
+  - image: "{{ authentik_redis_image }}"
+    archive: redis_7-alpine.tar
+  - image: "{{ nextcloud_image }}"
+    archive: nextcloud_27-apache.tar
+  - image: "{{ nextcloud_mariadb_image }}"
+    archive: mariadb_10.11.tar
+  - image: "{{ onlyoffice_image }}"
+    archive: onlyoffice_documentserver_7.5.tar
+
+preflight_enable_disk_checks: false
