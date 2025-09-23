@@ -13,6 +13,7 @@
 - name: Deploy Nextcloud stack
   community.docker.docker_compose_v2:
     project_name: nextcloud
+    pull: false
     definition:
       version: '3.9'
       services:

@@ -44,6 +44,7 @@
 - name: Deploy private CA service
   community.docker.docker_compose_v2:
     project_name: private_ca
+    pull: false
     definition:
       version: '3.9'
       services:

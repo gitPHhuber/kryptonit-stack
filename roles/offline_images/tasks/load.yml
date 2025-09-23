@@ -18,6 +18,106 @@
   loop_control:
     label: "{{ item.image | default(item) }}"
 
+- name: Verify Docker daemon is reachable on managed host
+  become: true
+  ansible.builtin.command: docker info
+  changed_when: false
+
+- name: Check that manifest file exists in cache
+  ansible.builtin.stat:
+    path: "{{ offline_images_manifest_path }}"
+  delegate_to: localhost
+  run_once: true
+  register: offline_images_manifest_stat
+
+- name: Abort when manifest file is missing
+  ansible.builtin.fail:
+    msg: |-
+      Manifest {{ offline_images_manifest_path }} was not found.
+      Run the fetch mode (mode=fetch) on a machine with internet
+      access to populate the cache.
+  when: not offline_images_manifest_stat.stat.exists
+  run_once: true
+
+- name: Load manifest content from cache
+  ansible.builtin.set_fact:
+    offline_images_manifest_content: >-
+      {{ lookup('file', offline_images_manifest_path) | from_json }}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+
+- name: Build manifest lookup by archive name
+  ansible.builtin.set_fact:
+    offline_images_manifest_lookup: >-
+      {% set pairs = [] %}
+      {% for entry in offline_images_manifest_content %}
+      {%   set _ = pairs.append([entry.archive, entry]) %}
+      {% endfor %}
+      {{ dict(pairs) }}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+
+- name: Share manifest lookup with managed host
+  ansible.builtin.set_fact:
+    offline_images_manifest_lookup: >-
+      {{ hostvars['localhost'].offline_images_manifest_lookup }}
+    offline_images_manifest_archives: >-
+      {{ hostvars['localhost'].offline_images_manifest_lookup
+         | dict2items | map(attribute='key') | list }}
+
+- name: Ensure manifest entries match catalog definitions
+  ansible.builtin.assert:
+    that:
+      - item.archive in offline_images_manifest_archives
+      - >-
+        (offline_images_manifest_lookup[item.archive].image
+         | default('')) == item.image
+    fail_msg: |-
+      Manifest {{ offline_images_manifest_path }} is out of sync with the
+      catalog entry {{ item.archive }} → {{ item.image }}. Re-run the fetch
+      mode to refresh the cache.
+  loop: "{{ offline_images_catalog }}"
+  loop_control:
+    label: "{{ item.archive }}"
+
+- name: Inspect cached archives on controller
+  ansible.builtin.stat:
+    path: "{{ offline_images_cache_dir | path_join(item.archive) }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  loop: "{{ offline_images_catalog }}"
+  loop_control:
+    label: "{{ item.archive }}"
+  register: offline_images_local_archives
+
+- name: Fail when cached archive is missing
+  ansible.builtin.fail:
+    msg: |-
+      Archive {{ item.item.archive }} is absent in
+      {{ offline_images_cache_dir }}.
+      Run the fetch mode to generate the required tarball.
+  when: not item.stat.exists
+  loop: "{{ offline_images_local_archives.results }}"
+  loop_control:
+    label: "{{ item.item.archive }}"
+
+- name: Verify cached archive checksums
+  ansible.builtin.assert:
+    that:
+      - >-
+        item.stat.checksum ==
+        offline_images_manifest_lookup[item.item.archive].checksum
+    fail_msg: |-
+      Cached archive {{ item.item.archive }} has checksum
+      {{ item.stat.checksum }}, expected
+      {{ offline_images_manifest_lookup[item.item.archive].checksum }}.
+      Re-run fetch mode to regenerate the cache.
+  loop: "{{ offline_images_local_archives.results }}"
+  loop_control:
+    label: "{{ item.item.archive }}"
+
 - name: Prepare archive metadata
   ansible.builtin.set_fact:
     offline_images_with_paths: >-
@@ -31,9 +131,13 @@
              offline_images_target_dir
              | path_join(item.archive)
            ) %}
+      {%   set manifest_entry =
+             offline_images_manifest_lookup[item.archive] %}
+      {%   set checksum = manifest_entry.checksum %}
       {%   set _ = result.append(item | combine({
               'local_path': local_path,
-              'remote_path': remote_path
+              'remote_path': remote_path,
+              'checksum': checksum
             })) %}
       {% endfor %}
       {{ result }}
@@ -55,6 +159,27 @@
   loop_control:
     label: "{{ item.archive }}"
 
+- name: Inspect remote archives
+  become: true
+  ansible.builtin.stat:
+    path: "{{ item.remote_path }}"
+    checksum_algorithm: sha256
+  loop: "{{ offline_images_with_paths }}"
+  loop_control:
+    label: "{{ item.archive }}"
+  register: offline_images_remote_archives
+
+- name: Validate remote archive checksums
+  ansible.builtin.assert:
+    that:
+      - item.stat.checksum == item.item.checksum
+    fail_msg: |-
+      Remote archive {{ item.item.archive }} checksum mismatch.
+      Expected {{ item.item.checksum }}, got {{ item.stat.checksum }}.
+  loop: "{{ offline_images_remote_archives.results }}"
+  loop_control:
+    label: "{{ item.item.archive }}"
+
 - name: Load Docker images from offline cache
   become: true
   community.docker.docker_image:
@@ -66,5 +191,23 @@
   loop: "{{ offline_images_with_paths }}"
   loop_control:
     label: "{{ item.image }}"
+  register: offline_images_load_results
   tags:
     - skip_ansible_lint
+
+- name: Summarize offline load results
+  ansible.builtin.set_fact:
+    offline_images_load_summary:
+      total: "{{ offline_images_with_paths | length }}"
+      loaded: "{{ offline_images_load_results.results | default([])
+        | rejectattr('skipped', 'defined') | list | length }}"
+      skipped: "{{ offline_images_with_paths | length
+        - (offline_images_load_results.results | default([])
+          | rejectattr('skipped', 'defined') | list | length) }}"
+
+- name: Display load summary
+  ansible.builtin.debug:
+    msg: >-
+      Images prepared: {{ offline_images_load_summary.total }} | Loaded:
+      {{ offline_images_load_summary.loaded }} | Skipped:
+      {{ offline_images_load_summary.skipped }}
