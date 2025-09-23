@@ -1,9 +1,17 @@
 ---
 - name: Prepare offline Docker images
-  when: (
-          use_offline_images
-          | default(offline_images_enabled)
-        ) | bool
+  vars:
+    offline_images_effective_enabled: >-
+      {{ use_offline_images
+         | default(offline_images_use_offline_images) }}
+    offline_images_effective_dir: >-
+      {{ offline_images_dir
+         | default(offline_images_offline_images_dir) }}
+    offline_images_effective_archives: >-
+      {{ offline_archives
+         | default(offline_images_offline_archives)
+         | list }}
+  when: (offline_images_effective_enabled | bool)
   tags:
     - offline
   block:
@@ -16,16 +24,14 @@
 
     - name: Prepare offline archive path list
       ansible.builtin.set_fact:
-        offline_images_archives: >-
-          {{ (offline_archives | default(offline_images_default_archives)
-               | list)
+        offline_images_combined_archives: >-
+          {{ offline_images_effective_archives
              + (offline_images_search.files | default([])
                | map(attribute='path') | list) }}
 
     - name: Determine offline images directory on host
       ansible.builtin.set_fact:
-        offline_images_target_dir: >-
-          {{ offline_images_dir | default(offline_images_directory) }}
+        offline_images_target_dir: "{{ offline_images_effective_dir }}"
 
     - name: Ensure offline image directory exists on host
       become: true
@@ -40,8 +46,8 @@
         src: "{{ item }}"
         dest: "{{ offline_images_target_dir }}/{{ item | basename }}"
         mode: '0644'
-      loop: "{{ offline_images_archives }}"
-      when: offline_images_archives | length > 0
+      loop: "{{ offline_images_combined_archives }}"
+      when: offline_images_combined_archives | length > 0
 
     - name: Load offline images if enabled
       become: true
