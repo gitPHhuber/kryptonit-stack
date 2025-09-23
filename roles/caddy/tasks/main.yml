@@ -31,6 +31,7 @@
       services:
         caddy:
           image: "{{ caddy_image }}"
+          pull_policy: never
           container_name: caddy
           restart: unless-stopped
           environment:

@@ -1,4 +1,21 @@
 ---
+- name: Validate deployment mode flag
+  ansible.builtin.assert:
+    that:
+      - kryptonit_mode in ['fetch', 'offline']
+    fail_msg: |-
+      kryptonit_mode must be either "fetch" or "offline".
+  run_once: true
+  tags:
+    - preflight
+
+- name: Display current launch mode
+  ansible.builtin.debug:
+    msg: "Running Kryptonit Stack in {{ kryptonit_mode }} mode."
+  run_once: true
+  tags:
+    - preflight
+
 - name: Verify Docker CLI is available
   ansible.builtin.command: docker --version
   register: preflight_docker_version
@@ -9,6 +26,13 @@
 - name: Verify Docker Compose is available
   ansible.builtin.command: docker compose version
   register: preflight_compose_version
+  changed_when: false
+  tags:
+    - preflight
+
+- name: Verify Docker daemon is running
+  ansible.builtin.command: docker info
+  register: preflight_docker_info
   changed_when: false
   tags:
     - preflight
@@ -24,6 +48,34 @@
   ansible.builtin.debug:
     msg: "{{ preflight_compose_version.stdout }}"
   when: preflight_compose_version.stdout is defined
+  tags:
+    - preflight
+
+- name: Collect required Docker images from catalog
+  ansible.builtin.set_fact:
+    preflight_required_images: >-
+      {{ offline_images_catalog | map(attribute='image') | list | unique }}
+  tags:
+    - preflight
+
+- name: Verify cached images are available locally
+  ansible.builtin.command: docker image inspect {{ item }}
+  register: preflight_image_inspect
+  changed_when: false
+  failed_when: preflight_image_inspect.rc != 0
+  loop: "{{ preflight_required_images | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when: preflight_required_images | length > 0
+  tags:
+    - preflight
+
+- name: Report cached image verification result
+  ansible.builtin.debug:
+    msg: >-
+      Verified availability of {{ preflight_required_images | length }} cached
+      Docker images.
+  when: preflight_required_images | length > 0
   tags:
     - preflight
 

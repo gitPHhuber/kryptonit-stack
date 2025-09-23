@@ -1,0 +1,12 @@
+---
+- name: Fetch Docker images for Kryptonit Stack
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    kryptonit_mode: fetch
+  tasks:
+    - name: Include image catalog role
+      ansible.builtin.import_role:
+        name: offline_images
+        tasks_from: fetch

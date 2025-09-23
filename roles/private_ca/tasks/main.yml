@@ -19,7 +19,7 @@
 
 - name: Initialize step-ca configuration if missing
   ansible.builtin.command: >-
-    docker run --rm \
+    docker run --rm --pull=never \
       -v {{ private_ca_project_path }}/config:/home/step/config \
       -v {{ private_ca_project_path }}/secrets:/home/step/secrets \
       -v {{ private_ca_project_path }}/db:/home/step/db \
@@ -49,6 +49,7 @@
       services:
         "{{ private_ca_service_name }}":
           image: "{{ private_ca_image }}"
+          pull_policy: never
           container_name: "{{ private_ca_service_name }}"
           restart: unless-stopped
           environment:

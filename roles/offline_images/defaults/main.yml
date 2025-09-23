@@ -1,4 +1,8 @@
 ---
-offline_images_use_offline_images: false
-offline_images_offline_images_dir: /opt/kryptonit-stack/images
-offline_images_offline_archives: []
+offline_images_cache_dir: "{{ playbook_dir | default('.') }}/images"
+offline_images_target_dir: /opt/kryptonit-stack/images
+offline_images_force_fetch: false
+offline_images_manifest_name: manifest.json
+offline_images_manifest_checksum_name: manifest.json.sha256
+offline_images_checksum_suffix: .sha256
+offline_images_catalog: []

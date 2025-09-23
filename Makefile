@@ -3,9 +3,9 @@ PYTHON_USER_SITE := $(shell python3 -c "import site; print(site.getusersitepacka
 ANSIBLE_COLLECTIONS_PATH ?= ./collections:~/.ansible/collections:/usr/share/ansible/collections:$(PYTHON_USER_SITE)/ansible_collections
 export ANSIBLE_COLLECTIONS_PATH
 INVENTORY ?= inventory/local.ini
-PLAYBOOK ?= site.yml
+PLAYBOOK ?= playbooks/stack-up.yml
 
-.PHONY: deps lint run vault images-cache bootstrap-tools offline-load offline-run
+.PHONY: deps lint run vault fetch-images load-images stack-up
 
 bootstrap-tools:
 	@command -v python3 >/dev/null 2>&1 || { echo "python3 is required" >&2; exit 1; }
@@ -21,17 +21,16 @@ lint: bootstrap-tools
 	yamllint .
 	ansible-lint --offline
 
-run:
-	$(ANSIBLE) -i "$(INVENTORY)" "$(PLAYBOOK)"
+run: stack-up
 
 vault:
 	ansible-vault edit group_vars/dev/vault.yml
 
-images-cache:
-	$(ANSIBLE) -i localhost, -c local playbooks/images-cache.yml
+fetch-images:
+	$(ANSIBLE) -i localhost, -c local playbooks/images-fetch.yml
 
-offline-load:
-	$(ANSIBLE) -i "$(INVENTORY)" offline-run.yml -e mode=load -K
+load-images:
+	$(ANSIBLE) -i "$(INVENTORY)" playbooks/images-load.yml
 
-offline-run:
-	$(ANSIBLE) -i "$(INVENTORY)" offline-run.yml -e mode=run -K
+stack-up:
+	$(ANSIBLE) -i "$(INVENTORY)" "$(PLAYBOOK)"

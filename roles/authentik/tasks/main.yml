@@ -20,6 +20,7 @@
       services:
         authentik-postgres:
           image: "{{ authentik_postgres_image }}"
+          pull_policy: never
           container_name: authentik-postgres
           restart: unless-stopped
           environment:
@@ -41,6 +42,7 @@
 
         authentik-redis:
           image: "{{ authentik_redis_image }}"
+          pull_policy: never
           container_name: authentik-redis
           restart: unless-stopped
           command:
@@ -63,6 +65,7 @@
 
         authentik-server:
           image: "{{ authentik_images.server }}"
+          pull_policy: never
           container_name: authentik-server
           restart: unless-stopped
           command: ["server"]
@@ -111,6 +114,7 @@
 
         authentik-worker:
           image: "{{ authentik_images.worker }}"
+          pull_policy: never
           container_name: authentik-worker
           restart: unless-stopped
           command: ["worker"]

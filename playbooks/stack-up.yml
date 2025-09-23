@@ -1,0 +1,35 @@
+---
+- name: Launch Kryptonit Stack using pre-fetched images
+  hosts: infra
+  become: true
+  gather_facts: true
+  vars:
+    kryptonit_mode: offline
+  tasks:
+    - name: Run preflight checks
+      ansible.builtin.import_role:
+        name: preflight
+
+    - name: Configure shared Docker network
+      ansible.builtin.import_role:
+        name: network
+
+    - name: Deploy private certificate authority
+      ansible.builtin.import_role:
+        name: private_ca
+
+    - name: Deploy Caddy reverse proxy
+      ansible.builtin.import_role:
+        name: caddy
+
+    - name: Deploy Authentik identity provider
+      ansible.builtin.import_role:
+        name: authentik
+
+    - name: Deploy Nextcloud platform
+      ansible.builtin.import_role:
+        name: nextcloud
+
+    - name: Deploy OnlyOffice DocumentServer
+      ansible.builtin.import_role:
+        name: onlyoffice

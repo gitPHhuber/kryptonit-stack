@@ -1,0 +1,188 @@
+---
+- name: Ensure offline image catalog is defined
+  ansible.builtin.assert:
+    that:
+      - offline_images_catalog | length > 0
+    fail_msg: |-
+      offline_images_catalog is empty. Define the list of images in
+      group_vars/all.yml.
+
+- name: Validate offline image entries
+  ansible.builtin.assert:
+    that:
+      - item.image is defined
+      - item.archive_name is defined
+    fail_msg: |-
+      Each offline image must define both "image" and "archive_name" fields.
+  loop: "{{ offline_images_catalog }}"
+  loop_control:
+    label: "{{ item.image | default(item) }}"
+
+- name: Confirm Docker daemon is available
+  ansible.builtin.command: docker info
+  register: offline_images_docker_info
+  changed_when: false
+
+- name: Ensure local cache directory exists
+  ansible.builtin.file:
+    path: "{{ offline_images_cache_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Gather existing archive information
+  ansible.builtin.stat:
+    path: "{{ offline_images_cache_dir | path_join(item.archive_name) }}"
+  loop: "{{ offline_images_catalog }}"
+  loop_control:
+    label: "{{ item.image }}"
+  register: offline_images_existing
+
+- name: Combine catalog with archive state
+  ansible.builtin.set_fact:
+    offline_images_combined: >-
+      {{ offline_images_catalog | zip(offline_images_existing.results) | list }}
+
+- name: Pull Docker images when required
+  community.docker.docker_image:
+    name: "{{ item.0.image }}"
+    source: pull
+    force_source: "{{ offline_images_force_fetch | bool }}"
+  loop: "{{ offline_images_combined }}"
+  loop_control:
+    label: "{{ item.0.image }}"
+  when: (offline_images_force_fetch | bool) or (not item.1.stat.exists)
+  tags:
+    - skip_ansible_lint
+
+- name: Save Docker images to cache
+  ansible.builtin.command:
+    cmd: >-
+      docker image save --output
+      {{ offline_images_cache_dir | path_join(item.0.archive_name) }}
+      {{ item.0.image }}
+  loop: "{{ offline_images_combined }}"
+  loop_control:
+    label: "{{ item.0.image }}"
+  when: (offline_images_force_fetch | bool) or (not item.1.stat.exists)
+  changed_when: true
+  register: offline_images_save_results
+
+- name: Gather archive checksums
+  ansible.builtin.stat:
+    path: "{{ offline_images_cache_dir | path_join(item.archive_name) }}"
+    checksum_algorithm: sha256
+  loop: "{{ offline_images_catalog }}"
+  loop_control:
+    label: "{{ item.archive_name }}"
+  register: offline_images_checksums
+
+- name: Ensure all archives are present
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+    fail_msg: |-
+      Archive {{ item.stat.path }} is missing. Re-run the fetch mode to
+      populate the cache.
+  loop: "{{ offline_images_checksums.results }}"
+  loop_control:
+    label: "{{ item.stat.path | basename }}"
+
+- name: Combine catalog with checksum data
+  ansible.builtin.set_fact:
+    offline_images_catalog_with_checksums: >-
+      {{
+        offline_images_catalog
+        | zip(offline_images_checksums.results)
+        | list
+      }}
+
+- name: Build manifest entries
+  ansible.builtin.set_fact:
+    offline_images_manifest_entries: >-
+      {% set result = [] %}
+      {% for entry, stat in offline_images_catalog_with_checksums %}
+      {%   set _ = result.append({
+            'image': entry.image,
+            'archive': entry.archive_name,
+            'checksum': stat.stat.checksum
+          }) %}
+      {% endfor %}
+      {{ result | sort(attribute='image') }}
+
+- name: Write manifest file
+  ansible.builtin.copy:
+    dest: >-
+      {{ offline_images_cache_dir | path_join(offline_images_manifest_name) }}
+    mode: '0644'
+    content: >-
+      {{ offline_images_manifest_entries | to_nice_json }}
+      \n
+  register: offline_images_manifest_copy
+
+- name: Write manifest checksum
+  vars:
+    manifest_checksum_value: >-
+      {{ offline_images_manifest_entries | to_nice_json | hash('sha256') }}
+    manifest_checksum_line: >-
+      {{ manifest_checksum_value }}  {{ offline_images_manifest_name }}
+    manifest_checksum_path: >-
+      {{
+        offline_images_cache_dir
+        | path_join(offline_images_manifest_checksum_name)
+      }}
+  ansible.builtin.copy:
+    dest: "{{ manifest_checksum_path }}"
+    mode: '0644'
+    content: >-
+      {{ manifest_checksum_line }}
+      \n
+
+- name: Write archive checksum files
+  ansible.builtin.copy:
+    dest: >-
+      {{
+        offline_images_cache_dir
+        | path_join(item.archive + offline_images_checksum_suffix)
+      }}
+    mode: '0644'
+    vars:
+      archive_checksum_line: >-
+        {{ item.checksum }}  {{ item.archive }}
+    content: >-
+      {{ archive_checksum_line }}
+      \n
+  loop: "{{ offline_images_manifest_entries }}"
+  loop_control:
+    label: "{{ item.archive }}"
+
+- name: Calculate saved archive count
+  ansible.builtin.set_fact:
+    offline_images_saved_count: >-
+      {{ offline_images_save_results.results
+         | default([])
+         | selectattr('changed', 'defined')
+         | selectattr('changed')
+         | list
+         | length }}
+
+- name: Calculate reused archive count
+  ansible.builtin.set_fact:
+    offline_images_reused_count: >-
+      {{
+        (offline_images_catalog | length)
+        - (offline_images_saved_count | int)
+      }}
+
+- name: Summarise fetch activity
+  ansible.builtin.set_fact:
+    offline_images_fetch_summary:
+      total: "{{ offline_images_catalog | length }}"
+      saved: "{{ offline_images_saved_count | int }}"
+      reused: "{{ offline_images_reused_count | int }}"
+
+- name: Display fetch summary
+  ansible.builtin.debug:
+    msg: |-
+      Images in catalog: {{ offline_images_fetch_summary.total }}.
+      Saved/updated: {{ offline_images_fetch_summary.saved }}.
+      Reused from cache: {{ offline_images_fetch_summary.reused }}.

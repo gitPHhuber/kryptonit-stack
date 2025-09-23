@@ -1,0 +1,222 @@
+---
+- name: Ensure offline image catalog is defined
+  ansible.builtin.assert:
+    that:
+      - offline_images_catalog | length > 0
+    fail_msg: |-
+      offline_images_catalog is empty. Run the fetch playbook or define the
+      list manually.
+
+- name: Validate offline image entries
+  ansible.builtin.assert:
+    that:
+      - item.image is defined
+      - item.archive_name is defined
+    fail_msg: |-
+      Each offline image must define both "image" and "archive_name" fields.
+  loop: "{{ offline_images_catalog }}"
+  loop_control:
+    label: "{{ item.image | default(item) }}"
+
+- name: Confirm Docker daemon is available
+  ansible.builtin.command: docker info
+  register: offline_images_docker_info
+  changed_when: false
+
+- name: Determine manifest path
+  ansible.builtin.set_fact:
+    offline_images_manifest_path: >-
+      {{ offline_images_cache_dir | path_join(offline_images_manifest_name) }}
+  delegate_to: localhost
+  run_once: true
+
+- name: Ensure manifest file exists
+  ansible.builtin.stat:
+    path: "{{ offline_images_manifest_path }}"
+  delegate_to: localhost
+  run_once: true
+  register: offline_images_manifest_stat
+
+- name: Abort when manifest is missing
+  ansible.builtin.assert:
+    that:
+      - offline_images_manifest_stat.stat.exists
+    fail_msg: |-
+      Manifest {{ offline_images_manifest_path }} is missing. Run the fetch
+      mode to populate the cache before launching offline mode.
+  delegate_to: localhost
+  run_once: true
+
+- name: Read manifest file
+  ansible.builtin.slurp:
+    src: "{{ offline_images_manifest_path }}"
+  delegate_to: localhost
+  run_once: true
+  register: offline_images_manifest_slurp
+
+- name: Parse manifest JSON
+  ansible.builtin.set_fact:
+    offline_images_manifest_entries: >-
+      {{ offline_images_manifest_slurp.content | b64decode | from_json }}
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate manifest structure
+  ansible.builtin.assert:
+    that:
+      - offline_images_manifest_entries is iterable
+    fail_msg: |-
+      Manifest file {{ offline_images_manifest_path }} is not a list of
+      entries.
+  delegate_to: localhost
+  run_once: true
+
+- name: Collect local archive data
+  ansible.builtin.stat:
+    path: "{{ offline_images_cache_dir | path_join(item.archive_name) }}"
+    checksum_algorithm: sha256
+  loop: "{{ offline_images_catalog }}"
+  loop_control:
+    label: "{{ item.archive_name }}"
+  delegate_to: localhost
+  run_once: true
+  register: offline_images_local_archives
+
+- name: Ensure archives exist in cache
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+    fail_msg: |-
+      Archive {{ item.stat.path }} is missing in cache. Run the fetch mode and
+      copy tarballs before offline deployment.
+  loop: "{{ offline_images_local_archives.results }}"
+  loop_control:
+    label: "{{ item.stat.path | basename }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Ensure manifest entry exists for each image
+  ansible.builtin.assert:
+    that:
+      - manifest_matches | length > 0
+    fail_msg: |-
+      Image {{ item.image }} with archive {{ item.archive_name }} is absent in
+      manifest {{ offline_images_manifest_path }}.
+  vars:
+    manifest_matches: >-
+      {{ offline_images_manifest_entries
+         | selectattr('image', 'equalto', item.image)
+         | selectattr('archive', 'equalto', item.archive_name)
+         | list }}
+  loop: "{{ offline_images_catalog }}"
+  loop_control:
+    label: "{{ item.image }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Combine catalog with local archive stats
+  ansible.builtin.set_fact:
+    offline_images_local_with_stats: >-
+      {{
+        offline_images_catalog
+        | zip(offline_images_local_archives.results)
+        | list
+      }}
+  delegate_to: localhost
+  run_once: true
+
+- name: Assemble offline image metadata
+  ansible.builtin.set_fact:
+    offline_images_metadata: >-
+      {% set data = [] %}
+      {% for catalog_item, stat_result in offline_images_local_with_stats %}
+      {%   set manifest_entry = (
+             offline_images_manifest_entries
+             | selectattr('image', 'equalto', catalog_item.image)
+             | selectattr('archive', 'equalto', catalog_item.archive_name)
+             | list
+             | first
+             | default({}, true)
+           ) %}
+      {%   set checksum = stat_result.stat.checksum %}
+      {%   set manifest_checksum = manifest_entry.get('checksum', checksum) %}
+      {%   set local_path =
+             offline_images_cache_dir
+             | path_join(catalog_item.archive_name) %}
+      {%   set remote_path =
+             offline_images_target_dir
+             | path_join(catalog_item.archive_name) %}
+      {%   set _ = data.append({
+              'image': catalog_item.image,
+              'archive': catalog_item.archive_name,
+              'local_path': local_path,
+              'remote_path': remote_path,
+              'checksum': checksum,
+              'manifest_checksum': manifest_checksum,
+              'from_manifest': manifest_entry | length > 0
+            }) %}
+      {% endfor %}
+      {{ data }}
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate archive checksums against manifest
+  ansible.builtin.assert:
+    that:
+      - item.from_manifest
+      - item.checksum == item.manifest_checksum
+    fail_msg: |-
+      Checksum mismatch for {{ item.archive }}. Regenerate the cache with the
+      fetch mode.
+  loop: "{{ hostvars['localhost'].offline_images_metadata }}"
+  loop_control:
+    label: "{{ item.archive }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Share offline metadata with hosts
+  ansible.builtin.set_fact:
+    offline_images_with_paths: >-
+      {{ hostvars['localhost'].offline_images_metadata | default([]) }}
+
+- name: Ensure offline metadata is available
+  ansible.builtin.assert:
+    that:
+      - offline_images_with_paths | length > 0
+    fail_msg: |-
+      offline_images_catalog produced no metadata. Re-run the fetch mode to
+      generate manifest and tar archives.
+
+- name: Ensure target directory for images exists
+  ansible.builtin.file:
+    path: "{{ offline_images_target_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Copy image archives to managed host
+  ansible.builtin.copy:
+    src: "{{ item.local_path }}"
+    dest: "{{ item.remote_path }}"
+    mode: '0644'
+  loop: "{{ offline_images_with_paths }}"
+  loop_control:
+    label: "{{ item.archive }}"
+
+- name: Load Docker images from offline cache
+  community.docker.docker_image:
+    name: "{{ item.image }}"
+    source: load
+    load_path: "{{ item.remote_path }}"
+    state: present
+    force_source: false
+  loop: "{{ offline_images_with_paths }}"
+  loop_control:
+    label: "{{ item.image }}"
+  tags:
+    - skip_ansible_lint
+
+- name: Summarise offline image load activity
+  ansible.builtin.debug:
+    msg: >-
+      Loaded {{ offline_images_with_paths | length }} images from
+      {{ offline_images_target_dir }}.

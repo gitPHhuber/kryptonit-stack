@@ -1,0 +1,12 @@
+---
+- name: Load Docker images on managed hosts from local cache
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    kryptonit_mode: offline
+  tasks:
+    - name: Import offline image loader
+      ansible.builtin.import_role:
+        name: offline_images
+        tasks_from: load

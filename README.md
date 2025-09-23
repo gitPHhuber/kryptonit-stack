@@ -1,107 +1,179 @@
 # kryptonit-stack
 
-Инфраструктурный репозиторий для автоматического развёртывания приватного стека сервисов (private-ca, Caddy, Authentik, Nextcloud, OnlyOffice) с помощью Ansible и Docker Compose v2.
-
-## Состав стека
-
-| Сервис | Назначение | Особенности |
-| --- | --- | --- |
-| **smallstep/step-ca** | Внутренний центр сертификации с ACME-эндпоинтом `https://private-ca:9000/acme/acme/directory`. | Генерирует корневой сертификат, хранит его на хосте и выгружает в `branding/assets/root_ca.crt`. |
-| **Caddy** | Единая точка входа, выдаёт TLS-сертификаты через private-ca. | Работает в сети `infra_internal`, может отключать автоматический HTTPS (dev). |
-| **Authentik** | IdP и единый вход. | Контейнеры server/worker + PostgreSQL и Redis. |
-| **Nextcloud** | Файловое хранилище. | Контейнеры web/cron + MariaDB и Redis. |
-| **OnlyOffice DocumentServer** | Совместное редактирование документов из Nextcloud. | JWT секрет для интеграции хранится в Vault. |
-
-Все контейнеры подключены к общей docker-сети `infra_internal` и настроены с `restart: unless-stopped`.
+Инфраструктурный проект для офлайн-первого развёртывания приватного стека
+сервисов (step-ca, Caddy, Authentik, Nextcloud и OnlyOffice) с помощью
+Ansible и Docker Compose v2. Основная идея — подготовить весь набор Docker-
+образов заранее, а затем запускать стек в полностью изолированном сегменте
+без обращения к реестрам и пакетным менеджерам.
 
 ## Требования
 
 ### Контролирующая машина
 
-- Python 3.10+ и Ansible 2.15+ (проверено с ansible-core 2.16).
-- Установленные `ansible-lint`, `yamllint`, `docker` (Python-библиотека) для коллекции `community.docker`.
-- Доступ в интернет для загрузки Docker образов.
+- Python 3.10+, ansible-core 2.15+ (проверено с ansible-core 2.16).
+- Коллекции Ansible: `community.docker`, `ansible.posix`, `community.general`
+  (устанавливаются через `make deps`).
+- Docker CLI с доступом в интернет для режима `fetch`.
+- Возможность запускать `ansible-playbook` без установки системных пакетов —
+  проект не выполняет `apt`, `dnf` и аналогичные команды.
 
 ### Управляемый хост
 
-- Ubuntu/Debian с systemd.
-- root-доступ (passwordless sudo или `--ask-become-pass`).
-- Порты 80, 443 и 9000 свободны.
-- Docker Engine 24+ и Docker Compose Plugin v2 (должны быть установлены вручную до запуска плейбуков).
+- Подготовленный вручную Docker Engine 24+ и Docker Compose Plugin v2.
+- Доступ по SSH от контроллера с правами `root` (passwordless sudo или
+  `--ask-become-pass`).
+- Свободные порты 80, 443 и 9000.
+- Достаточно дискового пространства для образов и данных сервисов.
 
-## Инсталляция / Ограничения сети
+Проект **не** устанавливает и не обновляет системные пакеты, не добавляет
+репозитории и не пытается развернуть Docker — все зависимости должны быть
+готовы до запуска Ansible.
 
-- **Docker и Compose — внешний предусловие.** Плейбуки не управляют пакетами хоста. Убедитесь, что на целевой машине уже установлены совместимые версии Docker Engine и Docker Compose Plugin, и сервис Docker запущен.
-- **Предзагрузка образов.** Включите `use_offline_images: true`, положите сохранённые `docker save` тарболы в локальный каталог `images/` и скопируйте их на таргет `/opt/kryptonit/images`. Роль `offline_images` выполнит `docker load -i` для каждого архива.
-- **Префлайт перед сервисами.** Роль `preflight` проверяет доступность Docker/Compose, свободные порты 80/443, объём свободного места на `/` и сообщает об отключённом swap.
+## Конфигурация
 
-## RF-friendly install
+Основные переменные заданы в `group_vars/all.yml`:
 
-Короткий чек-лист для развёртывания в ограниченных сетях:
+- `offline_images_cache_dir` — каталог с .tar на машине контроллера (по
+  умолчанию `./images`).
+- `offline_images_target_dir` — путь на управляемом хосте
+  (`/opt/kryptonit-stack/images`).
+- `offline_images_catalog` — список словарей `{image, archive_name}` для
+  каждого контейнера стека.
+- `offline_images_force_fetch` — перезаписывать ли кэш при повторном запуске
+  режима `fetch`.
+- `kryptonit_mode` — текущий режим (`fetch` или `offline`), по умолчанию
+  `offline`.
 
-1. Установите Docker Engine и Compose Plugin из доступного источника (заранее, вручную или через собственный playbook/скрипт).
-2. Убедитесь, что требуемые Docker-образы доступны: либо в публичном реестре, либо подготовлены архивы для `use_offline_images: true`.
-3. При полностью закрытом интернете сохраните нужные образы через `docker save -o images/<name>.tar`, перенесите их в каталог `images/` и включите `use_offline_images: true`.
+Пример описания каталога образов:
 
-## Быстрый старт
+```yaml
+offline_images_catalog:
+  - image: "smallstep/step-ca:0.27.3"
+    archive_name: step-ca_0.27.3.tar
+  - image: "caddy:2.7"
+    archive_name: caddy_2.7.tar
+```
 
-1. Склонируйте репозиторий и установите зависимости коллекций:
+Команда `make fetch-images` создаёт файл `manifest.json` и набор
+`*.sha256` в каталоге кэша. Manifest представляет собой список записей вида
+`{"image": "repo:tag", "archive": "name.tar", "checksum": "sha256"}` и
+используется в офлайн-режиме для проверки целостности.
+
+Секреты (пароли БД, JWT и т.п.) храните в `group_vars/<env>/vault.yml`,
+шифруя их через `ansible-vault` (`make vault`).
+
+## Офлайн-первый процесс
+
+1. **Установка зависимостей (один раз на контроллере).**
    ```bash
    make deps
    ```
-2. Настройте секреты в `group_vars/dev/vault.yml` (для локальной проверки уже есть заглушки; в production зашифруйте файл `ansible-vault` и обновите значения в `group_vars/prod/vault.yml`).
-3. (Локально) Добавьте записи в `/etc/hosts`:
-   ```text
-   127.0.0.1 auth.infra.local cloud.infra.local office.infra.local private-ca
-   ```
-4. Запустите развёртывание:
+2. **Подготовка кэша образов (режим `fetch`, требуется интернет).**
    ```bash
-   make run
+   make fetch-images
    ```
-   По умолчанию используется `inventory/local.ini`. Для другого окружения задайте переменную `INVENTORY`, например `make run INVENTORY=inventory/prod/hosts.ini`.
+   Плейбук `playbooks/images-fetch.yml` проверит доступность Docker, скачает
+   образы из реестров, сохранит их в `offline_images_cache_dir`, сформирует
+   `manifest.json`, `manifest.json.sha256` и отдельные файлы с чек-суммами
+   `*.tar.sha256`. При повторном запуске существующие архивы не
+   перезаписываются, если не установлен флаг `offline_images_force_fetch`.
+3. **Перенос кэша.** Скопируйте каталог `images/` (или указанный в
+   `offline_images_cache_dir`) на машину с ограниченным доступом.
+4. **Загрузка образов на управляемый хост (режим `offline`).**
+   ```bash
+   make load-images
+   ```
+   Плейбук `playbooks/images-load.yml` проверит наличие manifest и каждого
+   tar-архива, сверит контрольные суммы, скопирует файлы в
+   `offline_images_target_dir` и выполнит `docker load` для всех образов.
+   При отсутствии файла или несоответствии checksum выполнение завершится
+   понятной ошибкой.
+5. **Запуск стека из локальных образов.**
+   ```bash
+   make stack-up        # эквивалентно make run
+   ```
+   Плейбук `playbooks/stack-up.yml` запускает роль `preflight`: проверяет
+   режим `kryptonit_mode`, версии Docker/Compose, состояние демона, доступность
+   портов и наличие всех требуемых образов локально. Затем создаётся общая
+   сеть и разворачиваются сервисы. Все `docker compose` определения используют
+   `pull_policy: never`, поэтому сетевые обращения к реестрам исключены.
 
-После успешного выполнения будут доступны:
+После успешного запуска будут доступны:
+
 - https://auth.infra.local — Authentik
 - https://cloud.infra.local — Nextcloud
 - https://office.infra.local — OnlyOffice (через Caddy)
 
-Корневой сертификат внутреннего ЦС сохраняется на хосте (`/opt/private-ca/config/certs/root_ca.crt`) и автоматически копируется на управляющую машину в `branding/assets/root_ca.crt`. Раздайте этот файл пользователям и установите в доверенные корневые сертификаты ОС/браузеров.
+Корневой сертификат step-ca сохраняется в
+`/opt/private-ca/config/certs/root_ca.crt` и копируется на контроллер в
+`branding/assets/root_ca.crt` для последующего распространения.
 
-## Структура плейбуков
+## Управление сервисами
 
-- `site.yml` — единый плей, который выполняет роли в порядке: `offline_images` → `preflight` → сервисные роли (`network`, `private_ca`, `caddy`, `authentik`, `nextcloud`, `onlyoffice`).
-- При необходимости можно ограничить запуск отдельных ролей через теги.
-
-## Переменные и секреты
-
-- Общие параметры (домены, URL ACME, имена контейнеров) — в `group_vars/all.yml`.
-- Секреты (пароли БД, Redis, JWT, ключи Authentik) — только в Vault-файлах `group_vars/<env>/vault.yml`.
-  - `group_vars/dev/vault.yml` содержит примерные значения для локального запуска и отключает автоматический HTTPS в Caddy.
-  - `group_vars/prod/vault.yml` — шаблон; перед использованием зашифруйте `ansible-vault` и замените значения.
+- Остановить или удалить конкретный сервис можно стандартными командами
+  Docker Compose, например `docker compose -p caddy down`.
+- Для просмотра логов используйте `docker compose -p <project> logs -f` или
+  `docker logs <container>`.
 
 ## Makefile
 
-- `make deps` — установка необходимых коллекций (`community.docker`, `ansible.posix`, `community.general`).
-- `make run` — запуск `ansible-playbook` с выбранным инвентарём (по умолчанию `inventory/local.ini`).
-- `make lint` — локальный запуск `yamllint` и `ansible-lint`.
-- `make images-cache` — выгрузка Docker-образов из `docker_image_cache` в каталог `images/` (требуется Docker на контролирующей машине).
+- `make deps` — установка необходимых коллекций Ansible.
+- `make lint` — `yamllint` + `ansible-lint --offline`.
+- `make fetch-images` — режим fetch, подготовка кэша образов и manifest.
+- `make load-images` — копирование и загрузка образов на управляемый хост.
+- `make stack-up` / `make run` — полный запуск стека в офлайн-режиме.
+- `make vault` — редактирование Vault-файла с секретами.
 
-## Примечания по эксплуатации
+## FAQ
 
-- Роль `private_ca` инициализирует step-ca только при первом запуске; последующие прогоны idempotent.
-- `caddy` ожидает доступности ACME-эндпоинта перед стартом (если включён автоматический HTTPS).
-- Все роли используют `community.docker.docker_compose_v2` и внешнюю сеть `infra_internal`.
-- Корневой сертификат публикуется в `branding/assets/root_ca.crt` автоматически; храните его в системе контроля версий **только** для демонстрации. Для production рекомендуется хранить артефакт вне репозитория.
+**Нужно ли вводить пароль от sudo?**
+: По умолчанию в `inventory/local.ini` включён `ansible_become=true`. Если на
+  целевом хосте требуется пароль, запускайте playbook с `--ask-become-pass`.
+  Для сброса кэша sudo-пароля можно предварительно выполнить `sudo -K`.
 
-## Полезные команды
+**Где взять пароль от Vault?**
+: Храните его отдельно и передавайте в `ansible-playbook` через
+  `--vault-password-file` или `--ask-vault-pass`. Команда `make vault`
+  автоматически откроет `group_vars/dev/vault.yml` для редактирования.
 
-```bash
-make lint                      # прогнать yamllint + ansible-lint
-ansible-playbook site.yml -vvv # отладочный запуск
-ansible-vault edit group_vars/dev/vault.yml
+**Нужно ли править `/etc/hosts`?**
+: Для локального тестирования добавьте записи вида
+  `127.0.0.1 auth.infra.local cloud.infra.local office.infra.local private-ca`
+  на машину, с которой обращаетесь к сервисам.
+
+**Как доверять приватному центру сертификации?**
+: Импортируйте файл `branding/assets/root_ca.crt` в доверенные корневые
+  сертификаты ОС и браузеров пользователей.
+
+**Можно ли отключить проверки диска и swap?**
+: Да. Переменная `preflight_enable_disk_checks` в `group_vars/all.yml`
+  управляет запуском дополнительных проверок. По умолчанию они отключены.
+
+## Структура репозитория
+
 ```
-
-## CI
-
-`.github/workflows/lint.yml` запускает `yamllint` и `ansible-lint` на каждый push/PR. Убедитесь, что локальные линтеры проходят перед коммитом.
-
+kryptonit-stack/
+├─ inventory/
+│  └─ local.ini
+├─ group_vars/
+│  └─ all.yml
+├─ roles/
+│  ├─ offline_images/
+│  │  ├─ defaults/main.yml
+│  │  └─ tasks/{fetch.yml,load.yml}
+│  ├─ preflight/
+│  ├─ network/
+│  ├─ private_ca/
+│  ├─ caddy/
+│  ├─ authentik/
+│  ├─ nextcloud/
+│  └─ onlyoffice/
+├─ playbooks/
+│  ├─ images-fetch.yml
+│  ├─ images-load.yml
+│  └─ stack-up.yml
+├─ branding/
+├─ images/
+├─ Makefile
+└─ README.md
+```

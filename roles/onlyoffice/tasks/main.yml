@@ -17,6 +17,7 @@
       services:
         onlyoffice:
           image: "{{ onlyoffice_image }}"
+          pull_policy: never
           container_name: onlyoffice
           restart: unless-stopped
           environment:

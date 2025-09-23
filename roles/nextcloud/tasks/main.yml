@@ -18,6 +18,7 @@
       services:
         nextcloud-mariadb:
           image: "{{ nextcloud_mariadb_image }}"
+          pull_policy: never
           container_name: nextcloud-mariadb
           restart: unless-stopped
           environment:
@@ -44,6 +45,7 @@
 
         nextcloud-redis:
           image: "{{ nextcloud_redis_image }}"
+          pull_policy: never
           container_name: nextcloud-redis
           restart: unless-stopped
           command:
@@ -67,6 +69,7 @@
 
         nextcloud-web:
           image: "{{ nextcloud_image }}"
+          pull_policy: never
           container_name: nextcloud-web
           restart: unless-stopped
           environment:
@@ -113,6 +116,7 @@
 
         nextcloud-cron:
           image: "{{ nextcloud_cron_image }}"
+          pull_policy: never
           container_name: nextcloud-cron
           restart: unless-stopped
           entrypoint: ["/cron.sh"]
