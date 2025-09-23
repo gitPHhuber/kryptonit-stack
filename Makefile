@@ -29,6 +29,7 @@ vault:
 fetch-images:
 	$(ANSIBLE) -i "$(INVENTORY)" playbooks/images.yml -e mode=fetch
 
+
 load-images:
 	$(ANSIBLE) -i "$(INVENTORY)" playbooks/images.yml -e mode=offline
 

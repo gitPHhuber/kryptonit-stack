@@ -162,8 +162,10 @@ kryptonit-stack/
 
 - `make deps` — установка требуемых коллекций Ansible.
 - `make lint` — запуск `yamllint` и `ansible-lint`.
+
 - `make fetch-images` — режим `fetch` (использует выбранный `INVENTORY`, по умолчанию `inventory/local.ini`).
 - `make load-images` — режим `offline` (использует выбранный `INVENTORY`, по умолчанию `inventory/local.ini`).
+
 - `make stack-up` / `make run` — запуск стека.
 - `make vault` — редактирование Vault-файла с секретами.
 
