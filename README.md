@@ -32,15 +32,69 @@
 
 Проект **не** выполняет установку пакетов, не управляет репозиториями и не пытается ставить Docker. Все системные зависимости должны быть подготовлены заранее.
 
+## Конфигурация
+
+- `group_vars/all.yml` — базовые параметры стека: домены, имена сервисов, переменные для Docker Compose и каталог `offline_images_catalog` с перечнем образов и имён архивов.
+- `group_vars/dev/vault.yml` (или собственный Vault-файл) — секреты: пароли БД, JWT, bootstrap-данные Authentik. Редактируются через `make vault`.
+- `offline_images_cache_dir` — локальный каталог кэша (по умолчанию `./images` относительно плейбука). Здесь появляются `.tar`, `manifest.json` и `.sha256`.
+- `offline_images_target_dir` — директория на управляемом хосте, куда копируются тарболы перед загрузкой (`/opt/kryptonit-stack/images`).
+- `offline_images_manifest_filename` — имя manifest-файла (по умолчанию `manifest.json`).
+- `preflight_enable_disk_checks` — включает/отключает дополнительные проверки диска и swap (по умолчанию `false`).
+
 ## Работа с Docker-образами
 
-Стек разворачивается в два этапа:
+Роль `offline_images` поддерживает два режима работы, выбираемые переменной `mode` (значение по умолчанию — `fetch`). Управляющий плейбук `playbooks/images.yml` запускает соответствующие задачи:
 
-1. **Режим `fetch` (онлайн).** На машине с доступом в реестры выполните `make fetch-images`. Плейбук `playbooks/images-fetch.yml` подтянет требуемые образы и сохранит их в локальный кэш `images/*.tar`.
-2. **Режим `offline`.** Перенесите каталог `images/` на контроллер в закрытом сегменте (если требуется). Выполните `make load-images` — плейбук `playbooks/images-load.yml` загрузит тарболы на целевой хост и выполнит `docker load` для каждого образа.
-3. **Запуск стека.** После загрузки образов запустите `make stack-up` (или `make run`). Плейбук `playbooks/stack-up.yml` выполнит префлайт и стартует все сервисы, не обращаясь к реестрам.
+- `mode=fetch` — выполняет `docker pull` для каждого элемента каталога, сохраняет архивы (`*.tar`) в кэш, формирует `manifest.json` с полями `{image, archive, checksum}` и создаёт `.sha256`-файлы. Повторный запуск пропускает уже существующие архивы, если не установлен флаг `offline_images_force_fetch`.
+- `mode=offline` — проверяет наличие `manifest.json` и всех объявленных архивов, сверяет контрольные суммы, копирует тарболы на управляемый хост, выполняет `docker load` и ретегирует образы согласно каталогу. Никаких сетевых запросов к реестрам не выполняется.
 
-Перечень образов и имена тарболов задаются в `group_vars/all.yml` в переменной `offline_images_catalog`. При необходимости можно добавить собственные сервисы, дополнив список и роли.
+Плейбуки и роли не выполняют установку пакетов, работают только с уже доступным Docker/Compose и выводят сводки по количеству обработанных образов.
+
+## Сценарии запуска
+
+### 1. Подготовка кэша образов (mode=fetch)
+
+```bash
+make fetch-images
+```
+
+- Проверяет доступность Docker на контролирующей машине.
+- Выполняет `docker pull` для каждого элемента `offline_images_catalog`.
+- Сохраняет образы в `offline_images_cache_dir` в виде `*.tar`, обновляет `manifest.json` и создаёт `*.sha256`.
+- В выводе отображается сводка «Images in catalog / Saved / Skipped».
+
+Передайте `offline_images_force_fetch=true`, чтобы принудительно обновить существующие архивы.
+
+### 2. Доставка кэша на изолированную машину (mode=offline)
+
+Перенесите каталог кэша (по умолчанию `images/`) на контроллер, который управляет изолированной средой, затем выполните:
+
+```bash
+make load-images
+```
+
+- Проверяет доступность Docker на целевом хосте.
+- Подтверждает наличие `manifest.json`, всех `.tar` и корректность их контрольных сумм.
+- Копирует архивы в `offline_images_target_dir` и загружает их локально через `docker load` без обращения в реестры.
+- Выводит сводку «Images prepared / Loaded / Skipped».
+
+### 3. Запуск стека из локальных образов
+
+```bash
+make stack-up   # или make run
+```
+
+Плейбук `playbooks/stack-up.yml` выполняет:
+
+1. Префлайт-проверки (`roles/preflight`): наличие Docker/Compose, свободные порты `80`, `443`, `9000`, при необходимости — дисковое пространство и swap.
+2. Создание общей сети Docker (`roles/network`).
+3. Развёртывание сервисов (private-ca, Caddy, Authentik, Nextcloud, OnlyOffice). Каждая роль использует только локальные образы и не запускает `docker pull`.
+
+### 4. Остановка и диагностика
+
+- Остановить сервисы: `docker compose -p <project> down` (например, `docker compose -p caddy down`) либо `docker stop <container>` для единичных контейнеров.
+- Просмотреть логи: `docker compose -p <project> logs -f <service>` или `docker logs <container>`.
+- Удалить образы при необходимости: `docker image rm <tag>`.
 
 ## Быстрый старт
 
@@ -49,7 +103,7 @@
    make deps
    ```
 2. (Опционально) Подготовьте secrets в `group_vars/dev/vault.yml` или зашифруйте свои значения через `ansible-vault`.
-3. В режиме онлайн выполните `make fetch-images` и убедитесь, что в каталоге `images/` появились тарболы.
+3. В режиме онлайн выполните `make fetch-images` и убедитесь, что в каталоге `images/` появились `.tar`, `manifest.json` и файлы `*.sha256`.
 4. Настройте SSH-доступ к целевому хосту и при необходимости добавьте записи в `/etc/hosts` на рабочей станции:
    ```text
    127.0.0.1 auth.infra.local cloud.infra.local office.infra.local private-ca
@@ -88,6 +142,7 @@ kryptonit-stack/
 │  ├─ nextcloud/
 │  └─ onlyoffice/
 ├─ playbooks/
+│  ├─ images.yml
 │  ├─ images-fetch.yml
 │  ├─ images-load.yml
 │  └─ stack-up.yml
@@ -99,16 +154,16 @@ kryptonit-stack/
 
 ## Плейбуки
 
-- `playbooks/images-fetch.yml` — режим `fetch`, подтягивает образы и сохраняет их в `images/*.tar`.
-- `playbooks/images-load.yml` — режим `offline`, копирует тарболы на целевой хост и выполняет `docker load`.
+- `playbooks/images.yml` — единая точка входа для работы с образом; переменная `mode` переключает сценарий (`fetch` или `offline`).
+- `playbooks/images-fetch.yml` и `playbooks/images-load.yml` — обёртки над ролью `offline_images`, оставлены для совместимости и запускают соответствующие задачи напрямую.
 - `playbooks/stack-up.yml` — запуск всего стека (префлайт → сеть → сервисы) без доступа к интернету.
 
 ## Makefile
 
 - `make deps` — установка требуемых коллекций Ansible.
 - `make lint` — запуск `yamllint` и `ansible-lint`.
-- `make fetch-images` — режим fetch.
-- `make load-images` — загрузка образов на хост.
+- `make fetch-images` — режим `fetch` (`ansible-playbook playbooks/images.yml -e mode=fetch`).
+- `make load-images` — режим `offline` (`ansible-playbook playbooks/images.yml -e mode=offline`).
 - `make stack-up` / `make run` — запуск стека.
 - `make vault` — редактирование Vault-файла с секретами.
 
@@ -117,3 +172,11 @@ kryptonit-stack/
 - Роль `preflight` проверяет наличие Docker/Compose и свободные порты, но не устанавливает пакеты.
 - Роли сервисов используют только офлайн-предзагруженные образы и `community.docker.docker_compose_v2`.
 - Для обновления версий образов измените значения в `group_vars/all.yml`, перезапустите `make fetch-images`, затем `make load-images` и `make stack-up`.
+
+## FAQ
+
+- **Нужно ли делать `sudo -K` перед запуском?** Не требуется, достаточно иметь доступ с `sudo` (или настроить безпарольный sudo). При выполнении плейбуков используется `become`, поэтому Ansible сам запросит пароль, если необходимо.
+- **Где хранится пароль от Vault?** Файл `group_vars/dev/vault.yml` зашифрован Ansible Vault. Используйте `make vault` или `ansible-vault view/edit` с вашим паролем. Пароль Vault не хранится в репозитории.
+- **Нужно ли прописывать домены в `/etc/hosts`?** Для локального тестирования добавьте записи `auth.infra.local`, `cloud.infra.local`, `office.infra.local`, `private-ca` на рабочей станции. В боевой среде настройте DNS соответствующим образом.
+- **Как доверять приватному ЦС?** После запуска роль `private_ca` копирует корневой сертификат в `branding/assets/root_ca.crt`. Распространите его пользователям и импортируйте в доверенные корневые хранилища ОС/браузеров.
+- **Можно ли отключить дополнительные проверки (диск, swap)?** Да, установите `preflight_enable_disk_checks=false` (значение по умолчанию). При включении роли выполняют idempotent-проверки и выводят понятные ошибки.

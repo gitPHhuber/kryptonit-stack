@@ -1,0 +1,26 @@
+---
+- name: Manage Docker image cache for Kryptonit Stack (local)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    offline_images_mode: "{{ mode | default('fetch') }}"
+  tasks:
+    - name: Execute fetch workflow when requested
+      ansible.builtin.import_role:
+        name: offline_images
+        tasks_from: fetch
+      when: offline_images_mode == 'fetch'
+
+- name: Manage Docker image cache for Kryptonit Stack (managed hosts)
+  hosts: infra
+  become: true
+  gather_facts: false
+  vars:
+    offline_images_mode: "{{ mode | default('fetch') }}"
+  tasks:
+    - name: Execute offline load workflow when requested
+      ansible.builtin.import_role:
+        name: offline_images
+        tasks_from: load
+      when: offline_images_mode == 'offline'
