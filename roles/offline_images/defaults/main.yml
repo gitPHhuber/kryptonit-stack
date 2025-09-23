@@ -3,3 +3,6 @@ offline_images_cache_dir: "{{ playbook_dir | default('.') }}/images"
 offline_images_target_dir: /opt/kryptonit-stack/images
 offline_images_force_fetch: false
 offline_images_catalog: []
+offline_images_manifest_filename: manifest.json
+offline_images_manifest_path: >-
+  {{ offline_images_cache_dir | path_join(offline_images_manifest_filename) }}

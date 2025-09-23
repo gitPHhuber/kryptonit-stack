@@ -12,6 +12,7 @@
 - name: Deploy OnlyOffice Document Server
   community.docker.docker_compose_v2:
     project_name: onlyoffice
+    pull: false
     definition:
       version: '3.9'
       services:
