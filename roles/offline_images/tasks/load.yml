@@ -1,0 +1,70 @@
+---
+- name: Ensure offline image catalog is defined
+  ansible.builtin.assert:
+    that:
+      - offline_images_catalog | length > 0
+    fail_msg: |-
+      offline_images_catalog is empty. Run the fetch playbook or define the
+      list manually.
+
+- name: Validate offline image entries
+  ansible.builtin.assert:
+    that:
+      - item.image is defined
+      - item.archive is defined
+    fail_msg: |-
+      Each offline image must define both "image" and "archive" fields.
+  loop: "{{ offline_images_catalog }}"
+  loop_control:
+    label: "{{ item.image | default(item) }}"
+
+- name: Prepare archive metadata
+  ansible.builtin.set_fact:
+    offline_images_with_paths: >-
+      {% set result = [] %}
+      {% for item in offline_images_catalog %}
+      {%   set local_path = (
+             offline_images_cache_dir
+             | path_join(item.archive)
+           ) %}
+      {%   set remote_path = (
+             offline_images_target_dir
+             | path_join(item.archive)
+           ) %}
+      {%   set _ = result.append(item | combine({
+              'local_path': local_path,
+              'remote_path': remote_path
+            })) %}
+      {% endfor %}
+      {{ result }}
+
+- name: Ensure target directory for images exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ offline_images_target_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Copy image archives to managed host
+  become: true
+  ansible.builtin.copy:
+    src: "{{ item.local_path }}"
+    dest: "{{ item.remote_path }}"
+    mode: '0644'
+  loop: "{{ offline_images_with_paths }}"
+  loop_control:
+    label: "{{ item.archive }}"
+
+- name: Load Docker images from offline cache
+  become: true
+  community.docker.docker_image:
+    name: "{{ item.image }}"
+    source: load
+    load_path: "{{ item.remote_path }}"
+    state: present
+    force_source: false
+  loop: "{{ offline_images_with_paths }}"
+  loop_control:
+    label: "{{ item.image }}"
+  tags:
+    - skip_ansible_lint
